@@ -420,6 +420,58 @@ def _validate_sheet_data(
                 datetime.fromisoformat(str(row[7]))
 
 
+def _configuration_from_rows(
+    member_rows: tuple[tuple[object, ...], ...],
+    account_rows: tuple[tuple[object, ...], ...],
+    category_rows: tuple[tuple[object, ...], ...],
+    rule_rows: tuple[tuple[object, ...], ...],
+) -> WorkbookConfig:
+    """Build configuration and validate IDs plus cross-sheet references."""
+    members = tuple(
+        MemberConfig(
+            member_id=str(row[0]),
+            display_name=str(row[1]),
+            aliases=tuple(item.strip() for item in str(row[2]).split("|") if item.strip()),
+            active=_as_bool(row[3], location="Members.active"),
+        )
+        for row in member_rows
+    )
+    accounts = tuple(
+        AccountConfig(
+            account_id=str(row[0]),
+            institution=Institution(str(row[1])),
+            masked_identifier=str(row[2]),
+            default_member_id=str(row[3]),
+            display_name=str(row[4]),
+            active=_as_bool(row[5], location="Accounts.active"),
+        )
+        for row in account_rows
+    )
+    categories = tuple(
+        CategoryConfig(
+            category_id=str(row[0]),
+            display_name=str(row[1]),
+            sort_order=_as_int(row[2], location="Categories.sort_order"),
+            active=_as_bool(row[3], location="Categories.active"),
+        )
+        for row in category_rows
+    )
+    rules = tuple(
+        MerchantRule(
+            rule_id=str(row[0]),
+            match_type=MatchType(str(row[1])),
+            match_value=str(row[2]),
+            normalized_merchant=str(row[3]),
+            category_id=str(row[4]),
+            priority=_as_int(row[5], location="Merchant Rules.priority"),
+            active=_as_bool(row[6], location="Merchant Rules.active"),
+            updated_at=datetime.fromisoformat(str(row[7])) if row[7] else None,
+        )
+        for row in rule_rows
+    )
+    return WorkbookConfig(members, accounts, categories, rules)
+
+
 class GoogleWorkbookGateway:
     """Workbook gateway bound to one Google spreadsheet identifier."""
 
@@ -440,6 +492,7 @@ class GoogleWorkbookGateway:
         existing_version = self._client.schema_version(self.workbook_id)
         if existing_version not in (None, SCHEMA_VERSION):
             raise ValueError("workbook schema version is incompatible")
+        configuration_rows: dict[str, tuple[tuple[object, ...], ...]] = {}
         for schema in WORKSHEET_SCHEMAS:
             if schema.name not in names or not schema.columns:
                 continue
@@ -454,6 +507,22 @@ class GoogleWorkbookGateway:
                 raise ValueError(f"worksheet columns are incompatible: {schema.name}")
             if existing_rows:
                 _validate_sheet_data(schema.name, existing_rows[2:])
+                if schema.name in {"Members", "Accounts", "Categories", "Merchant Rules"}:
+                    configuration_rows[schema.name] = _data_rows(
+                        schema.name,
+                        existing_rows[2:],
+                    )
+
+        seeded_category_rows = tuple(
+            (category.category_id, category.display_name, index, True)
+            for index, category in enumerate(CATEGORY_SEEDS, start=1)
+        )
+        _configuration_from_rows(
+            configuration_rows.get("Members", ()),
+            configuration_rows.get("Accounts", ()),
+            configuration_rows.get("Categories", seeded_category_rows),
+            configuration_rows.get("Merchant Rules", ()),
+        )
 
         if "Transactions" not in names and names == ("Sheet1",):
             self._client.rename_worksheet(
@@ -492,10 +561,7 @@ class GoogleWorkbookGateway:
                 self.workbook_id,
                 "Categories",
                 3,
-                tuple(
-                    (category.category_id, category.display_name, index, True)
-                    for index, category in enumerate(CATEGORY_SEEDS, start=1)
-                ),
+                seeded_category_rows,
             )
 
     def validate_schema(self) -> None:
@@ -567,49 +633,12 @@ class GoogleWorkbookGateway:
             "Merchant Rules",
             self._client.read_rows(self.workbook_id, "Merchant Rules")[2:],
         )
-        members = tuple(
-            MemberConfig(
-                member_id=str(row[0]),
-                display_name=str(row[1]),
-                aliases=tuple(item.strip() for item in str(row[2]).split("|") if item.strip()),
-                active=_as_bool(row[3], location="Members.active"),
-            )
-            for row in member_rows
+        return _configuration_from_rows(
+            member_rows,
+            account_rows,
+            category_rows,
+            rule_rows,
         )
-        accounts = tuple(
-            AccountConfig(
-                account_id=str(row[0]),
-                institution=Institution(str(row[1])),
-                masked_identifier=str(row[2]),
-                default_member_id=str(row[3]),
-                display_name=str(row[4]),
-                active=_as_bool(row[5], location="Accounts.active"),
-            )
-            for row in account_rows
-        )
-        categories = tuple(
-            CategoryConfig(
-                category_id=str(row[0]),
-                display_name=str(row[1]),
-                sort_order=_as_int(row[2], location="Categories.sort_order"),
-                active=_as_bool(row[3], location="Categories.active"),
-            )
-            for row in category_rows
-        )
-        rules = tuple(
-            MerchantRule(
-                rule_id=str(row[0]),
-                match_type=MatchType(str(row[1])),
-                match_value=str(row[2]),
-                normalized_merchant=str(row[3]),
-                category_id=str(row[4]),
-                priority=_as_int(row[5], location="Merchant Rules.priority"),
-                active=_as_bool(row[6], location="Merchant Rules.active"),
-                updated_at=datetime.fromisoformat(str(row[7])) if row[7] else None,
-            )
-            for row in rule_rows
-        )
-        return WorkbookConfig(members, accounts, categories, rules)
 
 class GoogleWorkbookFactory:
     """Create or connect Google workbook gateways using one Sheets client."""

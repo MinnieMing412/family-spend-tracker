@@ -122,6 +122,42 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
         self.assertEqual(names_before, sheets.worksheet_names(gateway.workbook_id))
         self.assertIsNone(sheets.schema_version(gateway.workbook_id))
 
+    def test_provisioning_preflights_cross_sheet_references(self) -> None:
+        sheets = InMemorySheetsClient()
+        gateway = GoogleWorkbookFactory(sheets).create("Malformed")
+        sheets.rename_worksheet(gateway.workbook_id, "Sheet1", "Accounts")
+        sheets.write_rows(
+            gateway.workbook_id,
+            "Accounts",
+            1,
+            (
+                (
+                    "account_id",
+                    "institution",
+                    "masked_identifier",
+                    "default_member_id",
+                    "display_name",
+                    "active",
+                ),
+                (
+                    "Account ID",
+                    "Institution",
+                    "Masked Identifier",
+                    "Default Member ID",
+                    "Display Name",
+                    "Active",
+                ),
+                ("amex-1", "amex", "ending-12345", "missing", "AMEX", True),
+            ),
+        )
+        names_before = sheets.worksheet_names(gateway.workbook_id)
+
+        with self.assertRaisesRegex(ValueError, "unknown member"):
+            gateway.provision_schema()
+
+        self.assertEqual(names_before, sheets.worksheet_names(gateway.workbook_id))
+        self.assertIsNone(sheets.schema_version(gateway.workbook_id))
+
     def test_validation_rejects_type_incompatible_configuration_values(self) -> None:
         sheets = InMemorySheetsClient()
         gateway = GoogleWorkbookFactory(sheets).create("Family Spending")
