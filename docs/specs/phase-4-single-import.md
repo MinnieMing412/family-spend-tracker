@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-4-single-import`
 **Dependencies:** Phases 1, 2, and 3
 
 ## Problem Statement

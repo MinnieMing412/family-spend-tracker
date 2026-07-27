@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-5a-boa-parser`
 **Dependencies:** Phase 2 parser contract and Phase 4 import contract
 
 ## Problem Statement

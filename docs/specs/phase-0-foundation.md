@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-0-foundation`
 **Dependencies:** None
 
 ## Problem Statement

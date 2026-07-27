@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-2-amex-parser`
 **Dependencies:** Phase 0
 
 ## Problem Statement

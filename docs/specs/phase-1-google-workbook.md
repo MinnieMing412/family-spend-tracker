@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-1-google-workbook`
 **Dependencies:** Phase 0
 
 ## Problem Statement

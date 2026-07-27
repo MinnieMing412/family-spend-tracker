@@ -120,21 +120,24 @@ Implementation is divided into dependency-aware phases. Every phase delivers ext
 
 ### Agent phases
 
-| Phase | Agent brief | Depends on | Parallelism | Exit outcome |
-|---|---|---|---|---|
-| 0 | Foundation, domain contracts, CLI harness | None | Starts first | Installable CLI, pure domain models, fake adapters, end-to-end test harness |
-| 1 | Google workbook and OAuth foundation | 0 | Parallel with 2 | Setup/connect/validate/status/disconnect against workbook gateway |
-| 2 | PDF ingestion framework and AMEX parser | 0 | Parallel with 1 | Validated PDF intake and normalized AMEX statement parsing |
-| 3 | Categorization, reconciliation, and interactive review | 0 and normalized fixtures from 2 | After parser contract; may overlap late Phase 2 | Reviewable and correctable statement model |
-| 4 | Single-statement import and idempotent commit | 1, 2, 3 | Integration phase | Complete AMEX import vertical slice |
-| 5A | Bank of America parser | 2 and Phase 4 contract | Parallel with 5B and dashboard work | BOA fixtures pass common parser contract |
-| 5B | Chase parser | 2 and Phase 4 contract | Parallel with 5A and dashboard work | Chase fixtures pass common parser contract |
-| 6 | Folder import and resumable backfill | 4, with 5A/5B before release | Parallel with 7 after contracts settle | Recursive, checkpointed, bulk-approval workflow |
-| 7 | Dashboard and workbook analytics | 1 and stable transaction schema from 4 | Parallel with 5A/5B/6 | Filterable trailing-12-month Google dashboard |
-| 8 | Privacy, failure recovery, performance, and release hardening | 5A, 5B, 6, 7 | Final integration | Release gates and full acceptance suite pass |
+| Phase | Canonical branch | Agent brief | Depends on | Parallelism | Exit outcome |
+|---|---|---|---|---|---|
+| 0 | `dev/phase-0-foundation` | Foundation, domain contracts, CLI harness | None | Starts first | Installable CLI, pure domain models, fake adapters, end-to-end test harness |
+| 1 | `dev/phase-1-google-workbook` | Google workbook and OAuth foundation | 0 | Parallel with 2 | Setup/connect/validate/status/disconnect against workbook gateway |
+| 2 | `dev/phase-2-amex-parser` | PDF ingestion framework and AMEX parser | 0 | Parallel with 1 | Validated PDF intake and normalized AMEX statement parsing |
+| 3 | `dev/phase-3-review-and-rules` | Categorization, reconciliation, and interactive review | 0 and normalized fixtures from 2 | After parser contract; may overlap late Phase 2 | Reviewable and correctable statement model |
+| 4 | `dev/phase-4-single-import` | Single-statement import and idempotent commit | 1, 2, 3 | Integration phase | Complete AMEX import vertical slice |
+| 5A | `dev/phase-5a-boa-parser` | Bank of America parser | 2 and Phase 4 contract | Parallel with 5B and dashboard work | BOA fixtures pass common parser contract |
+| 5B | `dev/phase-5b-chase-parser` | Chase parser | 2 and Phase 4 contract | Parallel with 5A and dashboard work | Chase fixtures pass common parser contract |
+| 6 | `dev/phase-6-backfill` | Folder import and resumable backfill | 4, with 5A/5B before release | Parallel with 7 after contracts settle | Recursive, checkpointed, bulk-approval workflow |
+| 7 | `dev/phase-7-dashboard` | Dashboard and workbook analytics | 1 and stable transaction schema from 4 | Parallel with 5A/5B/6 | Filterable trailing-12-month Google dashboard |
+| 8 | `dev/phase-8-release-hardening` | Privacy, failure recovery, performance, and release hardening | 5A, 5B, 6, 7 | Final integration | Release gates and full acceptance suite pass |
 
 ### Phase ownership rules
 
+- Create each canonical phase branch from the latest `main` only after its dependencies have merged.
+- Push phase implementation only to its canonical `dev/phase-*` branch and merge it through a pull request into `main`.
+- Never build a dependent phase directly on an unmerged phase branch.
 - An agent changes only the contracts owned by its phase unless the owning phase agent agrees.
 - Contract changes require updating fake adapters and the CLI acceptance harness in the same change.
 - Institution parser agents do not modify Google or review behavior.

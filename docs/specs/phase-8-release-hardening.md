@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-8-release-hardening`
 **Dependencies:** Phases 5A, 5B, 6, and 7
 
 ## Problem Statement

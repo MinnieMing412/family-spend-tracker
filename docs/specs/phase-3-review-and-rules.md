@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-3-review-and-rules`
 **Dependencies:** Phase 0 and the normalized fixture contract from Phase 2
 
 ## Problem Statement
