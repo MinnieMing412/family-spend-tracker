@@ -18,7 +18,7 @@ from family_spend.domain.models import (
     WorkbookConfig,
 )
 from family_spend.ports import StatementParser, ValidatedPdf
-from family_spend.workbook_schema import CATEGORY_NAMES, SCHEMA_VERSION, WORKSHEET_SCHEMAS
+from family_spend.workbook_schema import CATEGORY_SEEDS, SCHEMA_VERSION, WORKSHEET_SCHEMAS
 
 
 class StaticStatementParser:
@@ -73,12 +73,30 @@ class InMemoryCredentialManager:
     def __init__(self) -> None:
         """Create an empty credential manager."""
         self._references: set[str] = set()
+        self._backup: set[str] | None = None
 
     def authorize(self, client_secrets: Path) -> str:
-        """Record a deterministic non-secret reference for the supplied file."""
+        """Stage a deterministic non-secret reference for the supplied file."""
+        self._backup = set(self._references)
         reference = f"memory:{client_secrets.name}"
         self._references.add(reference)
         return reference
+
+    def commit_authorization(self) -> None:
+        """Accept staged in-memory credentials."""
+        self._backup = None
+
+    def rollback_authorization(self) -> None:
+        """Restore credentials present before the latest authorization."""
+        if self._backup is not None:
+            self._references = self._backup
+            self._backup = None
+
+    def identity(self, credential_reference: str) -> str:
+        """Return a deterministic identity for acceptance tests."""
+        if credential_reference not in self._references:
+            raise ValueError("local Google credentials were not found")
+        return "Test Google account"
 
     def delete(self, credential_reference: str) -> None:
         """Remove a previously authorized reference."""
@@ -120,12 +138,12 @@ class InMemoryWorkbookGateway:
             accounts=self._configuration.accounts,
             categories=tuple(
                 CategoryConfig(
-                    category_id=name.lower().replace(" & ", "_and_").replace(" ", "_"),
-                    display_name=name,
+                    category_id=category.category_id,
+                    display_name=category.display_name,
                     sort_order=index,
                     active=True,
                 )
-                for index, name in enumerate(CATEGORY_NAMES, start=1)
+                for index, category in enumerate(CATEGORY_SEEDS, start=1)
             ),
             merchant_rules=self._configuration.merchant_rules,
         )
@@ -143,6 +161,15 @@ class InMemoryWorkbookGateway:
     def load_configuration(self) -> WorkbookConfig:
         """Return the workbook's members, accounts, categories, and rules."""
         return self._configuration
+
+    def latest_successful_import(self) -> datetime | None:
+        """Return the most recent completed in-memory import timestamp."""
+        timestamps = tuple(
+            record.imported_at
+            for record in self._imports_by_hash.values()
+            if record.status is ImportStatus.COMPLETE and record.imported_at is not None
+        )
+        return max(timestamps, default=None)
 
     def find_import_by_hash(self, statement_hash: str) -> ImportRecord | None:
         """Find a previously committed import by statement content hash."""

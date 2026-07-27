@@ -2,8 +2,8 @@
 
 ## Boundaries
 
-- `GoogleCredentialManager` owns browser OAuth and requests only
-  `https://www.googleapis.com/auth/spreadsheets`.
+- `GoogleCredentialManager` owns browser OAuth and requests Sheets access plus
+  only the OpenID/email scopes needed to identify the authorized account.
 - `FileCredentialStore` stores OAuth JSON in a private `0600` file.
 - `FileSettingsStore` stores only the workbook ID and credential-file reference.
 - `GoogleApiSheetsClient` translates a small, SDK-style boundary into official
@@ -43,3 +43,5 @@ or recreate worksheets during validation.
   requested scope.
 - Filesystem contract tests use isolated temporary directories.
 - Live Google access is never required by the default test suite or CI.
+- An opt-in integration test validates a disposable workbook when
+  `FAMILY_SPEND_GOOGLE_INTEGRATION_WORKBOOK_ID` is set.

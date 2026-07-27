@@ -23,6 +23,14 @@ class WorksheetSchema:
     columns: tuple[ColumnSchema, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class CategorySeed:
+    """One stable category ID and its initial user-facing name."""
+
+    category_id: str
+    display_name: str
+
+
 def _columns(*values: tuple[str, str]) -> tuple[ColumnSchema, ...]:
     """Convert key/header pairs into immutable column definitions."""
     return tuple(ColumnSchema(key, header) for key, header in values)
@@ -113,24 +121,24 @@ WORKSHEET_SCHEMAS = (
     WorksheetSchema("Dashboard"),
 )
 
-CATEGORY_NAMES = (
-    "Groceries",
-    "Dining",
-    "Housing",
-    "Utilities",
-    "Transportation",
-    "Shopping",
-    "Health",
-    "Childcare",
-    "Education",
-    "Entertainment",
-    "Travel",
-    "Subscriptions",
-    "Personal Care",
-    "Pets",
-    "Gifts & Donations",
-    "Fees",
-    "Cash",
-    "Other",
-    "Uncategorized",
+CATEGORY_SEEDS = (
+    CategorySeed("groceries", "Groceries"),
+    CategorySeed("dining", "Dining"),
+    CategorySeed("housing", "Housing"),
+    CategorySeed("utilities", "Utilities"),
+    CategorySeed("transportation", "Transportation"),
+    CategorySeed("shopping", "Shopping"),
+    CategorySeed("health", "Health"),
+    CategorySeed("childcare", "Childcare"),
+    CategorySeed("education", "Education"),
+    CategorySeed("entertainment", "Entertainment"),
+    CategorySeed("travel", "Travel"),
+    CategorySeed("subscriptions", "Subscriptions"),
+    CategorySeed("personal_care", "Personal Care"),
+    CategorySeed("pets", "Pets"),
+    CategorySeed("gifts_and_donations", "Gifts & Donations"),
+    CategorySeed("fees", "Fees"),
+    CategorySeed("cash", "Cash"),
+    CategorySeed("other", "Other"),
+    CategorySeed("uncategorized", "Uncategorized"),
 )

@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from family_spend.adapters.google import (
-    GoogleApiSheetsClient,
-    GoogleCredentialManager,
-    GoogleWorkbookFactory,
-)
+from family_spend.adapters.google import GoogleApiSheetsClient, GoogleWorkbookFactory
+from family_spend.adapters.google_auth import GoogleCredentialManager
 from family_spend.adapters.local import (
     FileCredentialStore,
     FileSettingsStore,
@@ -27,4 +24,5 @@ def build_application() -> FamilySpendApplication:
         settings=settings,
         credentials=credentials,
         workbooks=workbooks,
+        cache_location=application_directory / "cache",
     )

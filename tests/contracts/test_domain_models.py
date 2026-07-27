@@ -251,6 +251,41 @@ class WorkbookConfigContractTests(unittest.TestCase):
                 active=True,
             )
 
+    def test_workbook_rejects_duplicate_stable_ids(self) -> None:
+        duplicate = CategoryConfig(
+            category_id="dining",
+            display_name="Dining",
+            sort_order=1,
+            active=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "category IDs must be unique"):
+            WorkbookConfig((), (), (duplicate, duplicate), ())
+
+    def test_workbook_rejects_an_account_with_an_unknown_member(self) -> None:
+        account = AccountConfig(
+            account_id="amex-primary",
+            institution=Institution.AMEX,
+            masked_identifier="ending-12345",
+            default_member_id="missing",
+            display_name="AMEX",
+            active=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "unknown member"):
+            WorkbookConfig((), (account,), (), ())
+
+    def test_workbook_rejects_empty_stable_ids(self) -> None:
+        category = CategoryConfig(
+            category_id=" ",
+            display_name="Invalid",
+            sort_order=1,
+            active=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            WorkbookConfig((), (), (category,), ())
+
 
 class ConstrainedValueContractTests(unittest.TestCase):
     def test_warning_rejects_an_unsupported_severity(self) -> None:

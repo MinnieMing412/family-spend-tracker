@@ -18,6 +18,14 @@ def _validate_masked_account_identifier(value: str) -> None:
         raise ValueError("account identifier must contain only a masked account identifier")
 
 
+def _validate_unique_ids(values: tuple[str, ...], *, record_name: str) -> None:
+    """Reject blank or duplicate stable IDs in workbook configuration."""
+    if any(not value.strip() for value in values):
+        raise ValueError(f"{record_name} IDs must not be empty")
+    if len(set(values)) != len(values):
+        raise ValueError(f"{record_name} IDs must be unique")
+
+
 class Institution(StrEnum):
     """Financial institutions supported by the first product release."""
 
@@ -350,8 +358,22 @@ class WorkbookConfig:
     merchant_rules: tuple[MerchantRule, ...]
 
     def __post_init__(self) -> None:
-        """Reject merchant rules that reference categories that do not exist."""
-        category_ids = {category.category_id for category in self.categories}
+        """Validate stable IDs and references across authoritative configuration."""
+        member_ids = tuple(member.member_id for member in self.members)
+        account_ids = tuple(account.account_id for account in self.accounts)
+        category_values = tuple(category.category_id for category in self.categories)
+        rule_ids = tuple(rule.rule_id for rule in self.merchant_rules)
+        _validate_unique_ids(member_ids, record_name="member")
+        _validate_unique_ids(account_ids, record_name="account")
+        _validate_unique_ids(category_values, record_name="category")
+        _validate_unique_ids(rule_ids, record_name="merchant rule")
+        member_id_set = set(member_ids)
+        for account in self.accounts:
+            if account.default_member_id not in member_id_set:
+                raise ValueError(
+                    f"account references unknown member: {account.default_member_id}"
+                )
+        category_ids = set(category_values)
         for rule in self.merchant_rules:
             if rule.category_id not in category_ids:
                 raise ValueError(f"merchant rule references unknown category: {rule.category_id}")

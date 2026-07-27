@@ -5,10 +5,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from family_spend.adapters.google import (
+from family_spend.adapters.google import GoogleWorkbookFactory
+from family_spend.adapters.google_auth import (
+    GOOGLE_EMAIL_SCOPE,
+    GOOGLE_OPENID_SCOPE,
     GOOGLE_SHEETS_SCOPE,
     GoogleCredentialManager,
-    GoogleWorkbookFactory,
 )
 from family_spend.adapters.local import FileCredentialStore
 from family_spend.adapters.memory import InMemorySheetsClient
@@ -77,6 +79,26 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
             gateway.validate_schema()
 
         self.assertEqual(before, sheets.read_rows(gateway.workbook_id, "Members"))
+
+    def test_provisioning_rejects_malformed_existing_data_before_any_mutation(self) -> None:
+        sheets = InMemorySheetsClient()
+        gateway = GoogleWorkbookFactory(sheets).create("Malformed")
+        sheets.rename_worksheet(gateway.workbook_id, "Sheet1", "Members")
+        sheets.write_rows(
+            gateway.workbook_id,
+            "Members",
+            1,
+            (("member_id", "wrong"), ("Member ID", "Wrong")),
+        )
+        names_before = sheets.worksheet_names(gateway.workbook_id)
+        rows_before = sheets.read_rows(gateway.workbook_id, "Members")
+
+        with self.assertRaisesRegex(ValueError, "Members"):
+            gateway.provision_schema()
+
+        self.assertEqual(names_before, sheets.worksheet_names(gateway.workbook_id))
+        self.assertEqual(rows_before, sheets.read_rows(gateway.workbook_id, "Members"))
+        self.assertIsNone(sheets.schema_version(gateway.workbook_id))
 
     def test_validation_rejects_type_incompatible_configuration_values(self) -> None:
         sheets = InMemorySheetsClient()
@@ -155,14 +177,53 @@ class GoogleCredentialManagerContractTests(unittest.TestCase):
                 observed["scopes"] = scopes
                 return Flow()
 
-            manager = GoogleCredentialManager(store, flow_builder=build_flow)
+            identity = "person" + "@" + "example.invalid"
+            manager = GoogleCredentialManager(
+                store,
+                flow_builder=build_flow,
+                identity_resolver=lambda credentials: identity,
+            )
 
             reference = manager.authorize(Path("client-secrets.json"))
 
-            self.assertEqual((GOOGLE_SHEETS_SCOPE,), observed["scopes"])
+            self.assertEqual(
+                (GOOGLE_OPENID_SCOPE, GOOGLE_EMAIL_SCOPE, GOOGLE_SHEETS_SCOPE),
+                observed["scopes"],
+            )
             self.assertTrue(observed["open_browser"])
             self.assertEqual(0, observed["port"])
             self.assertEqual("synthetic", store.load(reference)["token"])
+            self.assertEqual(identity, manager.identity(reference))
+
+    def test_failed_setup_can_restore_previous_credentials(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = FileCredentialStore(Path(directory) / "credentials.json")
+            previous = {
+                "token": "previous",
+                "refresh_token": "previous-refresh",
+                "_family_spend_identity": "previous-account",
+            }
+            store.save(previous)
+
+            class Credentials:
+                def to_json(self) -> str:
+                    return '{"token": "replacement", "refresh_token": "replacement-refresh"}'
+
+            class Flow:
+                def run_local_server(self, *, port: int, open_browser: bool) -> Credentials:
+                    del port, open_browser
+                    return Credentials()
+
+            manager = GoogleCredentialManager(
+                store,
+                flow_builder=lambda client_secrets, scopes: Flow(),
+                identity_resolver=lambda credentials: "replacement-account",
+            )
+
+            manager.authorize(Path("replacement.json"))
+            manager.rollback_authorization()
+
+            self.assertEqual(previous, store.load(store.reference))
 
 
 if __name__ == "__main__":

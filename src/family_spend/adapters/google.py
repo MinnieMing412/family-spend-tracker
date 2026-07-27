@@ -5,85 +5,20 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Protocol, cast
 
+from family_spend.adapters.google_auth import GOOGLE_SHEETS_SCOPE
 from family_spend.adapters.local import FileCredentialStore
 from family_spend.domain.models import (
     AccountConfig,
-    ApprovedImport,
     CategoryConfig,
-    ImportRecord,
-    ImportResult,
     Institution,
     MatchType,
     MemberConfig,
     MerchantRule,
-    NormalizedTransaction,
     WorkbookConfig,
 )
-from family_spend.workbook_schema import CATEGORY_NAMES, SCHEMA_VERSION, WORKSHEET_SCHEMAS
-
-GOOGLE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
-
-
-class OAuthCredentials(Protocol):
-    """Serializable credentials returned by Google's installed-app flow."""
-
-    def to_json(self) -> str:
-        """Serialize credentials using Google's authorized-user format."""
-        ...
-
-
-class OAuthFlow(Protocol):
-    """Browser-based installed application authorization flow."""
-
-    def run_local_server(self, *, port: int, open_browser: bool) -> OAuthCredentials:
-        """Open consent in a browser and receive the local redirect."""
-        ...
-
-
-FlowBuilder = Callable[[Path, tuple[str, ...]], OAuthFlow]
-
-
-def _build_installed_app_flow(
-    client_secrets: Path,
-    scopes: tuple[str, ...],
-) -> OAuthFlow:
-    """Build Google's installed desktop application OAuth flow."""
-    from google_auth_oauthlib.flow import InstalledAppFlow
-
-    return cast(
-        OAuthFlow,
-        InstalledAppFlow.from_client_secrets_file(str(client_secrets), scopes=scopes),
-    )
-
-
-class GoogleCredentialManager:
-    """Run browser OAuth and retain its result in the private credential store."""
-
-    def __init__(
-        self,
-        store: FileCredentialStore,
-        *,
-        flow_builder: FlowBuilder = _build_installed_app_flow,
-    ) -> None:
-        """Create the manager with an injectable browser-flow boundary."""
-        self._store = store
-        self._flow_builder = flow_builder
-
-    def authorize(self, client_secrets: Path) -> str:
-        """Request Sheets-only access and return the stored credential reference."""
-        flow = self._flow_builder(client_secrets, (GOOGLE_SHEETS_SCOPE,))
-        credentials = flow.run_local_server(port=0, open_browser=True)
-        raw = json.loads(credentials.to_json())
-        if not isinstance(raw, dict):
-            raise ValueError("Google OAuth returned invalid credential data")
-        return self._store.save(raw)
-
-    def delete(self, credential_reference: str) -> None:
-        """Delete local OAuth credentials without touching the Google workbook."""
-        self._store.delete(credential_reference)
+from family_spend.workbook_schema import CATEGORY_SEEDS, SCHEMA_VERSION, WORKSHEET_SCHEMAS
 
 
 class SheetsClient(Protocol):
@@ -137,8 +72,10 @@ def _authorized_sheets_service(store: FileCredentialStore) -> Any:
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
+    credential_data = store.load(store.reference)
+    credential_data.pop("_family_spend_identity", None)
     credentials = Credentials.from_authorized_user_info(  # type: ignore[no-untyped-call]
-        store.load(store.reference),
+        credential_data,
         scopes=[GOOGLE_SHEETS_SCOPE],
     )
     if credentials.expired and credentials.refresh_token:
@@ -299,11 +236,6 @@ class GoogleApiSheetsClient:
         ).execute()
 
 
-def _category_id(display_name: str) -> str:
-    """Create the stable category ID used by the seeded taxonomy."""
-    return display_name.lower().replace(" & ", "_and_").replace(" ", "_")
-
-
 def _as_bool(value: object, *, location: str) -> bool:
     """Parse a strict workbook boolean or raise a compatibility error."""
     if isinstance(value, bool):
@@ -345,6 +277,22 @@ class GoogleWorkbookGateway:
         """Idempotently create required worksheets, headers, and categories."""
         names = self._client.worksheet_names(self.workbook_id)
         required_names = tuple(schema.name for schema in WORKSHEET_SCHEMAS)
+        existing_version = self._client.schema_version(self.workbook_id)
+        if existing_version not in (None, SCHEMA_VERSION):
+            raise ValueError("workbook schema version is incompatible")
+        for schema in WORKSHEET_SCHEMAS:
+            if schema.name not in names or not schema.columns:
+                continue
+            existing_rows = self._client.read_rows(self.workbook_id, schema.name)
+            expected_headers = (
+                tuple(column.key for column in schema.columns),
+                tuple(column.header for column in schema.columns),
+            )
+            if existing_rows and (
+                len(existing_rows) < 2 or existing_rows[:2] != expected_headers
+            ):
+                raise ValueError(f"worksheet columns are incompatible: {schema.name}")
+
         if "Transactions" not in names and names == ("Sheet1",):
             self._client.rename_worksheet(
                 self.workbook_id,
@@ -357,11 +305,8 @@ class GoogleWorkbookGateway:
                 self._client.add_worksheet(self.workbook_id, name)
                 names = (*names, name)
 
-        existing_version = self._client.schema_version(self.workbook_id)
         if existing_version is None:
             self._client.set_schema_version(self.workbook_id, SCHEMA_VERSION)
-        elif existing_version != SCHEMA_VERSION:
-            raise ValueError("workbook schema version is incompatible")
         for schema in WORKSHEET_SCHEMAS:
             if not schema.columns:
                 continue
@@ -386,8 +331,8 @@ class GoogleWorkbookGateway:
                 "Categories",
                 3,
                 tuple(
-                    (_category_id(name), name, index, True)
-                    for index, name in enumerate(CATEGORY_NAMES, start=1)
+                    (category.category_id, category.display_name, index, True)
+                    for index, category in enumerate(CATEGORY_SEEDS, start=1)
                 ),
             )
 
@@ -412,6 +357,16 @@ class GoogleWorkbookGateway:
         """Validate and load members, accounts, categories, and merchant rules."""
         self.validate_schema()
         return self._load_configuration()
+
+    def latest_successful_import(self) -> datetime | None:
+        """Return the newest completed import timestamp recorded in the workbook."""
+        rows = self._client.read_rows(self.workbook_id, "Imports")[2:]
+        timestamps: list[datetime] = []
+        for row in rows:
+            if len(row) < 12 or str(row[10]) != "complete" or not row[11]:
+                continue
+            timestamps.append(datetime.fromisoformat(str(row[11])))
+        return max(timestamps, default=None)
 
     def _load_configuration(self) -> WorkbookConfig:
         member_rows = self._client.read_rows(self.workbook_id, "Members")[2:]
@@ -465,24 +420,6 @@ class GoogleWorkbookGateway:
             if any(value != "" for value in row)
         )
         return WorkbookConfig(members, accounts, categories, rules)
-
-    def find_import_by_hash(self, statement_hash: str) -> ImportRecord | None:
-        """Defer import history lookup to the Phase 4 gateway extension."""
-        del statement_hash
-        raise NotImplementedError("transaction imports are owned by Phase 4")
-
-    def find_transactions(
-        self, fingerprints: tuple[str, ...]
-    ) -> tuple[NormalizedTransaction, ...]:
-        """Defer transaction lookup to the Phase 4 gateway extension."""
-        del fingerprints
-        raise NotImplementedError("transaction imports are owned by Phase 4")
-
-    def commit_import(self, approved_import: ApprovedImport) -> ImportResult:
-        """Defer approved import commits to the Phase 4 gateway extension."""
-        del approved_import
-        raise NotImplementedError("transaction imports are owned by Phase 4")
-
 
 class GoogleWorkbookFactory:
     """Create or connect Google workbook gateways using one Sheets client."""

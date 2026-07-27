@@ -90,6 +90,10 @@ class FileCredentialStore:
         """Return the non-secret reference used in local settings."""
         return str(self._path)
 
+    def exists(self) -> bool:
+        """Return whether the credential file currently exists."""
+        return self._path.exists()
+
     def save(self, credential_data: dict[str, Any]) -> str:
         """Save credential data and return its non-secret filesystem reference."""
         _write_private_json(self._path, credential_data)

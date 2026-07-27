@@ -44,8 +44,10 @@ family-spend setup \
   --workbook-url "https://docs.google.com/spreadsheets/d/WORKBOOK_ID/edit"
 ```
 
-Setup opens Google authorization in the browser and requests only the Google
-Sheets scope. The workbook contains `Transactions`, `Members`, `Accounts`,
+Setup opens Google authorization in the browser and requests Google Sheets
+access plus basic OpenID/email identity so `status` can show the authorized
+account. It does not request general Google Drive access. The workbook contains
+`Transactions`, `Members`, `Accounts`,
 `Categories`, `Merchant Rules`, `Imports`, and `Dashboard`. Machine-readable
 column keys occupy the first row, user-facing headers occupy the second row,
 and editable data begins on the third row.

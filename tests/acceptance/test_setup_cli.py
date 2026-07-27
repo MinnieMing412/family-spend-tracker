@@ -124,6 +124,37 @@ class SetupCliAcceptanceTests(unittest.TestCase):
         self.assertEqual("", stderr.getvalue())
         self.assertIn("compatible", stdout.getvalue())
 
+    def test_status_reports_connection_identity_imports_exceptions_and_cache(self) -> None:
+        settings = InMemorySettingsStore()
+        credentials = InMemoryCredentialManager()
+        workbooks = InMemoryWorkbookFactory()
+        workbook = workbooks.create("Existing")
+        workbook.provision_schema()
+        reference = credentials.authorize(Path("client-secrets.json"))
+        credentials.commit_authorization()
+        settings.save(LocalSettings(workbook.workbook_id, reference))
+        application = FamilySpendApplication(
+            settings=settings,
+            credentials=credentials,
+            workbooks=workbooks,
+            cache_location=Path("/private/cache/family-spend"),
+        )
+        stdout = StringIO()
+
+        exit_code = main(
+            ["status"],
+            application=application,
+            stdout=stdout,
+            stderr=StringIO(),
+        )
+
+        self.assertEqual(0, exit_code)
+        output = stdout.getvalue()
+        self.assertIn("Authenticated Google identity: Test Google account", output)
+        self.assertIn("Last successful import: none", output)
+        self.assertIn("Unresolved exceptions: none recorded", output)
+        self.assertIn("Retained cache location: /private/cache/family-spend", output)
+
     def test_disconnect_removes_local_access_but_keeps_the_workbook(self) -> None:
         settings = InMemorySettingsStore()
         credentials = InMemoryCredentialManager()
@@ -152,6 +183,65 @@ class SetupCliAcceptanceTests(unittest.TestCase):
         self.assertFalse(credentials.contains(reference))
         workbooks.connect(workbook.workbook_id).validate_schema()
         self.assertIn("Local Google access removed", stdout.getvalue())
+
+    def test_failed_setup_preserves_the_previous_local_connection(self) -> None:
+        settings = InMemorySettingsStore()
+        credentials = InMemoryCredentialManager()
+        workbooks = InMemoryWorkbookFactory()
+        previous = workbooks.create("Previous")
+        previous.provision_schema()
+        previous_reference = credentials.authorize(Path("previous-client.json"))
+        credentials.commit_authorization()
+        previous_settings = LocalSettings(previous.workbook_id, previous_reference)
+        settings.save(previous_settings)
+        application = FamilySpendApplication(
+            settings=settings,
+            credentials=credentials,
+            workbooks=workbooks,
+        )
+        stderr = StringIO()
+
+        exit_code = main(
+            [
+                "setup",
+                "--client-secrets",
+                "replacement-client.json",
+                "--workbook-url",
+                "https://docs.google.com/spreadsheets/d/missing/edit",
+            ],
+            application=application,
+            stdout=StringIO(),
+            stderr=stderr,
+        )
+
+        self.assertEqual(1, exit_code)
+        self.assertEqual(previous_settings, settings.load())
+        self.assertTrue(credentials.contains(previous_reference))
+        self.assertFalse(credentials.contains("memory:replacement-client.json"))
+
+    def test_setup_rejects_a_non_google_workbook_url(self) -> None:
+        application = FamilySpendApplication(
+            settings=InMemorySettingsStore(),
+            credentials=InMemoryCredentialManager(),
+            workbooks=InMemoryWorkbookFactory(),
+        )
+        stderr = StringIO()
+
+        exit_code = main(
+            [
+                "setup",
+                "--client-secrets",
+                "client-secrets.json",
+                "--workbook-url",
+                "https://example.invalid/spreadsheets/d/workbook-1/edit",
+            ],
+            application=application,
+            stdout=StringIO(),
+            stderr=stderr,
+        )
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("docs.google.com", stderr.getvalue())
 
 
 if __name__ == "__main__":

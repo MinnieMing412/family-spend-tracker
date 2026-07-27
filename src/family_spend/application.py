@@ -8,14 +8,17 @@ from family_spend.domain.models import LocalSettings
 from family_spend.ports import (
     CredentialManager,
     SettingsStore,
+    WorkbookConnection,
     WorkbookFactory,
-    WorkbookGateway,
 )
 
 
 def _workbook_id_from_url(workbook_url: str) -> str:
     """Extract a Google spreadsheet ID from its standard browser URL."""
-    path_parts = urlparse(workbook_url).path.strip("/").split("/")
+    parsed = urlparse(workbook_url)
+    if parsed.scheme != "https" or parsed.hostname != "docs.google.com":
+        raise ValueError("workbook URL must use https://docs.google.com")
+    path_parts = parsed.path.strip("/").split("/")
     if len(path_parts) < 3 or path_parts[:2] != ["spreadsheets", "d"] or not path_parts[2]:
         raise ValueError("workbook URL must be a Google Sheets spreadsheet URL")
     return path_parts[2]
@@ -54,15 +57,17 @@ class FamilySpendApplication:
         self,
         *,
         settings: SettingsStore,
-        workbook: WorkbookGateway | None = None,
+        workbook: WorkbookConnection | None = None,
         credentials: CredentialManager | None = None,
         workbooks: WorkbookFactory | None = None,
+        cache_location: Path | None = None,
     ) -> None:
         """Create the application with its local settings and workbook providers."""
         self._settings = settings
         self._workbook = workbook
         self._credentials = credentials
         self._workbooks = workbooks
+        self._cache_location = cache_location
 
     def setup(
         self,
@@ -76,18 +81,23 @@ class FamilySpendApplication:
             raise ValueError("setup dependencies are not configured")
 
         credential_reference = self._credentials.authorize(client_secrets)
-        if workbook_url is None:
-            workbook = self._workbooks.create(workbook_name)
-            workbook.provision_schema()
-        else:
-            workbook = self._workbooks.connect(_workbook_id_from_url(workbook_url))
-            workbook.validate_schema()
-        self._settings.save(
-            LocalSettings(
-                workbook_id=workbook.workbook_id,
-                credential_reference=credential_reference,
+        try:
+            if workbook_url is None:
+                workbook = self._workbooks.create(workbook_name)
+                workbook.provision_schema()
+            else:
+                workbook = self._workbooks.connect(_workbook_id_from_url(workbook_url))
+                workbook.validate_schema()
+            self._settings.save(
+                LocalSettings(
+                    workbook_id=workbook.workbook_id,
+                    credential_reference=credential_reference,
+                )
             )
-        )
+        except Exception:
+            self._credentials.rollback_authorization()
+            raise
+        self._credentials.commit_authorization()
         categories = ", ".join(
             category.display_name for category in workbook.load_configuration().categories
         )
@@ -108,10 +118,22 @@ class FamilySpendApplication:
             raise ValueError("workbook dependency is not configured")
         workbook.validate_schema()
         configuration = workbook.load_configuration()
+        identity = (
+            self._credentials.identity(settings.credential_reference)
+            if self._credentials is not None
+            else "unavailable"
+        )
+        latest_import = workbook.latest_successful_import()
+        latest_import_text = latest_import.isoformat() if latest_import is not None else "none"
+        cache_text = str(self._cache_location) if self._cache_location is not None else "none"
         return (
             f"Connected workbook {settings.workbook_id}: "
             f"{len(configuration.members)} members, "
-            f"{len(configuration.accounts)} accounts."
+            f"{len(configuration.accounts)} accounts.\n"
+            f"Authenticated Google identity: {identity}\n"
+            f"Last successful import: {latest_import_text}\n"
+            "Unresolved exceptions: none recorded\n"
+            f"Retained cache location: {cache_text}"
         )
 
     def validate_workbook(self) -> str:
