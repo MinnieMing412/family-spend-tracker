@@ -127,6 +127,32 @@ class CliAcceptanceTests(unittest.TestCase):
         self.assertNotIn(token, stderr.getvalue())
         self.assertIn("[REDACTED_TOKEN]", stderr.getvalue())
 
+    def test_unexpected_boundary_failure_is_redacted_by_the_cli(self) -> None:
+        account = " ".join(("1234", "5678"))
+
+        class FailingSettingsStore(InMemorySettingsStore):
+            def load(self) -> LocalSettings | None:
+                raise ValueError(f"Invalid account {account}")
+
+        application = FamilySpendApplication(
+            settings=FailingSettingsStore(),
+            workbook=InMemoryWorkbookGateway(WorkbookConfig((), (), (), ())),
+        )
+        stdout = StringIO()
+        stderr = StringIO()
+
+        exit_code = main(
+            ["status"],
+            application=application,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+        self.assertEqual(1, exit_code)
+        self.assertEqual("", stdout.getvalue())
+        self.assertNotIn(account, stderr.getvalue())
+        self.assertIn("ending-5678", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, cast
 
 from family_spend.domain.models import (
     AccountConfig,
     CategoryConfig,
+    DomainWarning,
+    ImportRecord,
+    ImportResult,
+    ImportStatus,
     Institution,
     MatchType,
     MemberConfig,
@@ -16,6 +20,7 @@ from family_spend.domain.models import (
     NormalizedStatement,
     NormalizedTransaction,
     TransactionType,
+    WarningSeverity,
     WorkbookConfig,
 )
 
@@ -84,6 +89,10 @@ class NormalizedTransactionContractTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "transaction_date"):
             make_transaction(transaction_date=cast(Any, "2026-99-99"))
 
+    def test_transaction_rejects_a_datetime_for_a_date_only_field(self) -> None:
+        with self.assertRaisesRegex(TypeError, "transaction_date"):
+            make_transaction(transaction_date=datetime(2026, 5, 1, 12, 30))
+
     def test_transaction_rejects_a_non_money_amount_at_runtime(self) -> None:
         with self.assertRaisesRegex(TypeError, "amount"):
             make_transaction(
@@ -140,6 +149,10 @@ class NormalizedStatementContractTests(unittest.TestCase):
     def test_statement_rejects_non_date_fields_at_runtime(self) -> None:
         with self.assertRaisesRegex(TypeError, "start_date"):
             make_statement(start_date=cast(Any, "2026-99-99"))
+
+    def test_statement_rejects_a_datetime_for_a_date_only_field(self) -> None:
+        with self.assertRaisesRegex(TypeError, "closing_date"):
+            make_statement(closing_date=datetime(2026, 5, 1, 12, 30))
 
     def test_statement_rejects_an_end_date_before_its_start_date(self) -> None:
         with self.assertRaisesRegex(ValueError, "date range"):
@@ -221,6 +234,57 @@ class WorkbookConfigContractTests(unittest.TestCase):
                     ),
                 ),
             )
+
+    def test_rule_rejects_an_unsupported_match_type(self) -> None:
+        with self.assertRaisesRegex(TypeError, "match_type"):
+            MerchantRule(
+                rule_id="rule-1",
+                match_type=cast(Any, "unsupported"),
+                match_value="EXAMPLE MERCHANT",
+                normalized_merchant="EXAMPLE MERCHANT",
+                category_id="dining",
+                priority=1,
+                active=True,
+            )
+
+
+class ConstrainedValueContractTests(unittest.TestCase):
+    def test_warning_rejects_an_unsupported_severity(self) -> None:
+        with self.assertRaisesRegex(TypeError, "severity"):
+            DomainWarning(
+                code="parse-warning",
+                message="Example warning",
+                severity=cast(Any, "unsupported"),
+            )
+
+    def test_import_record_rejects_an_unsupported_status(self) -> None:
+        with self.assertRaisesRegex(TypeError, "status"):
+            ImportRecord(
+                import_id="import-1",
+                statement_hash="a" * 64,
+                status=cast(Any, "unsupported"),
+                transaction_ids=(),
+            )
+
+    def test_import_result_rejects_an_unsupported_status(self) -> None:
+        with self.assertRaisesRegex(TypeError, "status"):
+            ImportResult(
+                import_id="import-1",
+                status=cast(Any, "unsupported"),
+                transaction_ids=(),
+                message="Example",
+            )
+
+    def test_import_status_accepts_a_supported_value(self) -> None:
+        result = ImportResult(
+            import_id="import-1",
+            status=ImportStatus.COMPLETE,
+            transaction_ids=(),
+            message="Complete",
+        )
+
+        self.assertEqual(ImportStatus.COMPLETE, result.status)
+        self.assertEqual(WarningSeverity.WARNING, WarningSeverity("warning"))
 
 
 if __name__ == "__main__":

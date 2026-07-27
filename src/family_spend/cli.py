@@ -64,3 +64,7 @@ def main(
     except FamilySpendError as error:
         print(error.user_message(), file=stderr)
         return error.exit_code
+    except Exception as error:
+        translated_error = FamilySpendError(str(error))
+        print(translated_error.user_message(), file=stderr)
+        return translated_error.exit_code

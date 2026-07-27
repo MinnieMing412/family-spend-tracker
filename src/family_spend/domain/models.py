@@ -136,9 +136,9 @@ class NormalizedTransaction:
             raise TypeError("institution must be an Institution")
         if not isinstance(self.transaction_type, TransactionType):
             raise TypeError("transaction_type must be a TransactionType")
-        if not isinstance(self.transaction_date, date):
+        if type(self.transaction_date) is not date:
             raise TypeError("transaction_date must be a date")
-        if self.posting_date is not None and not isinstance(self.posting_date, date):
+        if self.posting_date is not None and type(self.posting_date) is not date:
             raise TypeError("posting_date must be a date or None")
         if not isinstance(self.amount, Money):
             raise TypeError("amount must be Money")
@@ -163,6 +163,10 @@ class DomainWarning:
     evidence_ref: str | None = None
     transaction_id: str | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.severity, WarningSeverity):
+            raise TypeError("severity must be a WarningSeverity")
+
 
 @dataclass(frozen=True, slots=True)
 class NormalizedStatement:
@@ -182,11 +186,11 @@ class NormalizedStatement:
         if not isinstance(self.institution, Institution):
             raise TypeError("institution must be an Institution")
         _validate_masked_account_identifier(self.account_id)
-        if not isinstance(self.start_date, date):
+        if type(self.start_date) is not date:
             raise TypeError("start_date must be a date")
-        if not isinstance(self.end_date, date):
+        if type(self.end_date) is not date:
             raise TypeError("end_date must be a date")
-        if not isinstance(self.closing_date, date):
+        if type(self.closing_date) is not date:
             raise TypeError("closing_date must be a date")
         if self.end_date < self.start_date:
             raise ValueError("statement date range must end on or after its start date")
@@ -270,6 +274,10 @@ class MerchantRule:
     active: bool
     updated_at: datetime | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.match_type, MatchType):
+            raise TypeError("match_type must be a MatchType")
+
 
 @dataclass(frozen=True, slots=True)
 class WorkbookConfig:
@@ -299,6 +307,10 @@ class ImportRecord:
     transaction_ids: tuple[str, ...]
     imported_at: datetime | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, ImportStatus):
+            raise TypeError("status must be an ImportStatus")
+
 
 @dataclass(frozen=True, slots=True)
 class ApprovedImport:
@@ -314,6 +326,10 @@ class ImportResult:
     status: ImportStatus
     transaction_ids: tuple[str, ...]
     message: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, ImportStatus):
+            raise TypeError("status must be an ImportStatus")
 
 
 @dataclass(frozen=True, slots=True)
