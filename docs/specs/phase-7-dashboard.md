@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-7-dashboard`
 **Dependencies:** Phase 1 and the stable approved transaction schema from Phase 4
 
 ## Problem Statement

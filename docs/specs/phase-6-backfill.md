@@ -2,6 +2,7 @@
 
 **Status:** Ready for agent
 **Tracker label:** `ready-for-agent`
+**Implementation branch:** `dev/phase-6-backfill`
 **Dependencies:** Phase 4; Phases 5A and 5B required before v1 release
 
 ## Problem Statement
