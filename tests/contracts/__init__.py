@@ -1,0 +1,1 @@
+"""Stable boundary contract tests."""
