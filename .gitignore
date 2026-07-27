@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+credentials/
+credentials.json
+token.json
+*.token.json
+
+# Statement data and parser artifacts
+statements/
+tmp/
+cache/
+.cache/
+*.extracted.txt
+
+# Local retained application data
+.family-spend/
