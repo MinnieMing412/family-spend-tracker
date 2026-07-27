@@ -3,8 +3,10 @@
 from family_spend.adapters.memory import (
     FixedClock,
     InMemoryCheckpointStore,
+    InMemoryCredentialManager,
     InMemorySettingsStore,
     InMemoryStructuredCache,
+    InMemoryWorkbookFactory,
     InMemoryWorkbookGateway,
     ScriptedReviewPort,
     SequentialIdGenerator,
@@ -15,8 +17,10 @@ from family_spend.adapters.memory import (
 __all__ = [
     "FixedClock",
     "InMemoryCheckpointStore",
+    "InMemoryCredentialManager",
     "InMemorySettingsStore",
     "InMemoryStructuredCache",
+    "InMemoryWorkbookFactory",
     "InMemoryWorkbookGateway",
     "ScriptedReviewPort",
     "SequentialIdGenerator",

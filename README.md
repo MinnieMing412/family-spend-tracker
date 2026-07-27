@@ -20,12 +20,55 @@ The current command surface is available with:
 .venv/bin/family-spend --help
 ```
 
+## Connect Google Sheets
+
+Before the first setup:
+
+1. In Google Cloud, enable the Google Sheets API.
+2. Create an OAuth client with application type **Desktop app**.
+3. Download its client JSON file somewhere outside this repository.
+
+Create a new workbook:
+
+```bash
+family-spend setup \
+  --client-secrets /path/to/client-secret.json \
+  --workbook-name "Family Spending"
+```
+
+Or connect an existing compatible workbook:
+
+```bash
+family-spend setup \
+  --client-secrets /path/to/client-secret.json \
+  --workbook-url "https://docs.google.com/spreadsheets/d/WORKBOOK_ID/edit"
+```
+
+Setup opens Google authorization in the browser and requests only the Google
+Sheets scope. The workbook contains `Transactions`, `Members`, `Accounts`,
+`Categories`, `Merchant Rules`, `Imports`, and `Dashboard`. Machine-readable
+column keys occupy the first row, user-facing headers occupy the second row,
+and editable data begins on the third row.
+
+Useful lifecycle commands:
+
+```bash
+family-spend status
+family-spend validate-workbook
+family-spend disconnect
+```
+
+On macOS, the workbook reference and OAuth credentials are stored separately
+under `~/Library/Application Support/Family Spend Tracker/`. `disconnect`
+removes these local files and does not delete the Google workbook.
+
 ## Project documents
 
 - [Product requirements](docs/PRD.md)
 - [Agent implementation plan](docs/specs/IMPLEMENTATION_PLAN.md)
 - [Agent phase specifications](docs/specs/)
 - [Phase 0 contracts](docs/architecture/phase-0-contracts.md)
+- [Phase 1 Google workbook architecture](docs/architecture/phase-1-google-workbook.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy

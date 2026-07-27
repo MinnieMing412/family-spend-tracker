@@ -59,8 +59,29 @@ class SettingsStore(Protocol):
         ...
 
 
+class CredentialManager(Protocol):
+    """Authorize Google access and remove locally retained credentials."""
+
+    def authorize(self, client_secrets: Path) -> str:
+        """Run browser authorization and return a non-secret local reference."""
+        ...
+
+    def delete(self, credential_reference: str) -> None:
+        """Delete the credentials identified by the local reference."""
+        ...
+
+
 class WorkbookGateway(Protocol):
     """Read and update the Google Sheets workbook through a stable interface."""
+
+    @property
+    def workbook_id(self) -> str:
+        """Return the identifier of the connected Google workbook."""
+        ...
+
+    def provision_schema(self) -> None:
+        """Create missing required sheets, headers, metadata, and categories."""
+        ...
 
     def validate_schema(self) -> None:
         """Raise an error when required sheets or columns are missing."""
@@ -82,6 +103,18 @@ class WorkbookGateway(Protocol):
 
     def commit_import(self, approved_import: ApprovedImport) -> ImportResult:
         """Atomically store an approved statement and its transactions."""
+        ...
+
+
+class WorkbookFactory(Protocol):
+    """Create or connect workbook gateways after Google authorization."""
+
+    def create(self, title: str) -> WorkbookGateway:
+        """Create a new workbook and return its bound gateway."""
+        ...
+
+    def connect(self, workbook_id: str) -> WorkbookGateway:
+        """Return a gateway bound to an existing workbook."""
         ...
 
 

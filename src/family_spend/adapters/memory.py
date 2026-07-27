@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from family_spend.domain.models import (
     ApprovedImport,
     BackfillCheckpoint,
+    CategoryConfig,
     ImportRecord,
     ImportResult,
     ImportStatus,
@@ -16,6 +18,7 @@ from family_spend.domain.models import (
     WorkbookConfig,
 )
 from family_spend.ports import StatementParser, ValidatedPdf
+from family_spend.workbook_schema import CATEGORY_NAMES, SCHEMA_VERSION, WORKSHEET_SCHEMAS
 
 
 class StaticStatementParser:
@@ -64,18 +67,78 @@ class InMemorySettingsStore:
         self._settings = None
 
 
+class InMemoryCredentialManager:
+    """Simulate browser authorization without creating real credentials."""
+
+    def __init__(self) -> None:
+        """Create an empty credential manager."""
+        self._references: set[str] = set()
+
+    def authorize(self, client_secrets: Path) -> str:
+        """Record a deterministic non-secret reference for the supplied file."""
+        reference = f"memory:{client_secrets.name}"
+        self._references.add(reference)
+        return reference
+
+    def delete(self, credential_reference: str) -> None:
+        """Remove a previously authorized reference."""
+        self._references.discard(credential_reference)
+
+    def contains(self, credential_reference: str) -> bool:
+        """Return whether a credential reference is currently stored."""
+        return credential_reference in self._references
+
+
 class InMemoryWorkbookGateway:
     """Simulate workbook reads and imports without contacting Google Sheets."""
 
-    def __init__(self, configuration: WorkbookConfig) -> None:
+    def __init__(
+        self,
+        configuration: WorkbookConfig,
+        *,
+        workbook_id: str = "workbook-1",
+    ) -> None:
         """Create an empty simulated workbook with the supplied configuration."""
+        self._workbook_id = workbook_id
         self._configuration = configuration
         self._imports_by_hash: dict[str, ImportRecord] = {}
         self._transactions_by_fingerprint: dict[str, NormalizedTransaction] = {}
+        self._schema_version: str | None = SCHEMA_VERSION
+        self._worksheets = tuple(schema.name for schema in WORKSHEET_SCHEMAS)
+
+    @property
+    def workbook_id(self) -> str:
+        """Return the simulated workbook identifier."""
+        return self._workbook_id
+
+    def provision_schema(self) -> None:
+        """Provision required sheets and seed the default category taxonomy."""
+        self._schema_version = SCHEMA_VERSION
+        self._worksheets = tuple(schema.name for schema in WORKSHEET_SCHEMAS)
+        self._configuration = WorkbookConfig(
+            members=self._configuration.members,
+            accounts=self._configuration.accounts,
+            categories=tuple(
+                CategoryConfig(
+                    category_id=name.lower().replace(" & ", "_and_").replace(" ", "_"),
+                    display_name=name,
+                    sort_order=index,
+                    active=True,
+                )
+                for index, name in enumerate(CATEGORY_NAMES, start=1)
+            ),
+            merchant_rules=self._configuration.merchant_rules,
+        )
+
+    def worksheet_names(self) -> tuple[str, ...]:
+        """Return worksheet names in their provisioned order."""
+        return self._worksheets
 
     def validate_schema(self) -> None:
-        """Accept the in-memory workbook as structurally valid."""
-        return None
+        """Reject a workbook with missing or incompatible schema metadata."""
+        expected = tuple(schema.name for schema in WORKSHEET_SCHEMAS)
+        if self._schema_version != SCHEMA_VERSION or self._worksheets != expected:
+            raise ValueError("workbook schema is missing or incompatible")
 
     def load_configuration(self) -> WorkbookConfig:
         """Return the workbook's members, accounts, categories, and rules."""
@@ -133,6 +196,136 @@ class InMemoryWorkbookGateway:
             transaction_ids=record.transaction_ids,
             message="import complete",
         )
+
+
+class InMemoryWorkbookFactory:
+    """Create and connect isolated in-memory workbook gateways."""
+
+    def __init__(self) -> None:
+        """Create an empty workbook collection."""
+        self._workbooks: dict[str, InMemoryWorkbookGateway] = {}
+        self._next_id = 1
+
+    def create(self, title: str) -> InMemoryWorkbookGateway:
+        """Create an unprovisioned workbook with a deterministic identifier."""
+        del title
+        workbook_id = f"workbook-{self._next_id}"
+        self._next_id += 1
+        workbook = InMemoryWorkbookGateway(
+            WorkbookConfig((), (), (), ()),
+            workbook_id=workbook_id,
+        )
+        self._workbooks[workbook_id] = workbook
+        return workbook
+
+    def connect(self, workbook_id: str) -> InMemoryWorkbookGateway:
+        """Return an existing workbook or fail for an unknown identifier."""
+        try:
+            return self._workbooks[workbook_id]
+        except KeyError as error:
+            raise ValueError(f"workbook not found: {workbook_id}") from error
+
+
+class InMemorySheetsClient:
+    """Simulate the small Google Sheets API boundary used by Phase 1."""
+
+    def __init__(self) -> None:
+        """Create an empty spreadsheet service."""
+        self._workbooks: dict[str, dict[str, object]] = {}
+        self._next_id = 1
+
+    def create_workbook(self, title: str) -> str:
+        """Create a workbook containing Google's default `Sheet1` worksheet."""
+        workbook_id = f"google-workbook-{self._next_id}"
+        self._next_id += 1
+        self._workbooks[workbook_id] = {
+            "title": title,
+            "version": None,
+            "sheets": {"Sheet1": []},
+        }
+        return workbook_id
+
+    def _sheets(self, workbook_id: str) -> dict[str, list[list[object]]]:
+        """Return mutable worksheet storage for one workbook."""
+        workbook = self._workbooks.get(workbook_id)
+        if workbook is None:
+            raise ValueError(f"workbook not found: {workbook_id}")
+        sheets = workbook["sheets"]
+        assert isinstance(sheets, dict)
+        return sheets
+
+    def worksheet_names(self, workbook_id: str) -> tuple[str, ...]:
+        """Return worksheet names in insertion order."""
+        return tuple(self._sheets(workbook_id))
+
+    def rename_worksheet(self, workbook_id: str, old_name: str, new_name: str) -> None:
+        """Rename a worksheet while preserving its position and rows."""
+        sheets = self._sheets(workbook_id)
+        if new_name in sheets:
+            raise ValueError(f"worksheet already exists: {new_name}")
+        replacement: dict[str, list[list[object]]] = {}
+        for name, rows in sheets.items():
+            replacement[new_name if name == old_name else name] = rows
+        sheets.clear()
+        sheets.update(replacement)
+
+    def add_worksheet(self, workbook_id: str, name: str) -> None:
+        """Append an empty worksheet, rejecting duplicate titles."""
+        sheets = self._sheets(workbook_id)
+        if name in sheets:
+            raise ValueError(f"worksheet already exists: {name}")
+        sheets[name] = []
+
+    def schema_version(self, workbook_id: str) -> str | None:
+        """Return the workbook's schema version."""
+        workbook = self._workbooks.get(workbook_id)
+        if workbook is None:
+            raise ValueError(f"workbook not found: {workbook_id}")
+        version = workbook["version"]
+        return str(version) if version is not None else None
+
+    def set_schema_version(self, workbook_id: str, version: str) -> None:
+        """Set the workbook's schema version."""
+        workbook = self._workbooks.get(workbook_id)
+        if workbook is None:
+            raise ValueError(f"workbook not found: {workbook_id}")
+        workbook["version"] = version
+
+    def read_rows(self, workbook_id: str, worksheet: str) -> tuple[tuple[object, ...], ...]:
+        """Return immutable copies of populated worksheet rows."""
+        try:
+            rows = self._sheets(workbook_id)[worksheet]
+        except KeyError as error:
+            raise ValueError(f"worksheet not found: {worksheet}") from error
+        return tuple(tuple(row) for row in rows)
+
+    def write_rows(
+        self,
+        workbook_id: str,
+        worksheet: str,
+        start_row: int,
+        rows: tuple[tuple[object, ...], ...],
+    ) -> None:
+        """Replace worksheet rows beginning at a one-based position."""
+        try:
+            stored_rows = self._sheets(workbook_id)[worksheet]
+        except KeyError as error:
+            raise ValueError(f"worksheet not found: {worksheet}") from error
+        index = start_row - 1
+        while len(stored_rows) < index:
+            stored_rows.append([])
+        for offset, row in enumerate(rows):
+            target = index + offset
+            replacement = list(row)
+            if target < len(stored_rows):
+                stored_rows[target] = replacement
+            else:
+                stored_rows.append(replacement)
+
+    def header_row_count(self, workbook_id: str, worksheet: str) -> int:
+        """Return the two schema header rows when both are populated."""
+        rows = self.read_rows(workbook_id, worksheet)
+        return int(len(rows) >= 2 and bool(rows[0]) and bool(rows[1])) * 2
 
 
 class InMemoryCheckpointStore:
