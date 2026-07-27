@@ -107,6 +107,10 @@ class WorkbookConnection(Protocol):
         """Return the newest successful import timestamp, if one exists."""
         ...
 
+    def unresolved_exception_count(self) -> int:
+        """Return the number of unresolved import or reconciliation exceptions."""
+        ...
+
 class WorkbookGateway(WorkbookConnection, Protocol):
     """Extend a workbook connection with Phase 4 transaction import operations."""
 

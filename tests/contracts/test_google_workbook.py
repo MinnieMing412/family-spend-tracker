@@ -100,6 +100,28 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
         self.assertEqual(rows_before, sheets.read_rows(gateway.workbook_id, "Members"))
         self.assertIsNone(sheets.schema_version(gateway.workbook_id))
 
+    def test_provisioning_preflights_existing_configuration_values(self) -> None:
+        sheets = InMemorySheetsClient()
+        gateway = GoogleWorkbookFactory(sheets).create("Malformed")
+        sheets.rename_worksheet(gateway.workbook_id, "Sheet1", "Categories")
+        sheets.write_rows(
+            gateway.workbook_id,
+            "Categories",
+            1,
+            (
+                ("category_id", "display_name", "sort_order", "active"),
+                ("Category ID", "Display Name", "Sort Order", "Active"),
+                ("dining", "Dining", "not-an-integer", True),
+            ),
+        )
+        names_before = sheets.worksheet_names(gateway.workbook_id)
+
+        with self.assertRaisesRegex(ValueError, "sort_order"):
+            gateway.provision_schema()
+
+        self.assertEqual(names_before, sheets.worksheet_names(gateway.workbook_id))
+        self.assertIsNone(sheets.schema_version(gateway.workbook_id))
+
     def test_validation_rejects_type_incompatible_configuration_values(self) -> None:
         sheets = InMemorySheetsClient()
         gateway = GoogleWorkbookFactory(sheets).create("Family Spending")
@@ -154,6 +176,71 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
         self.assertEqual(("ONE", "M ONE"), configuration.members[0].aliases)
         self.assertEqual("amex-1", configuration.accounts[0].account_id)
         self.assertEqual("rule-1", configuration.merchant_rules[0].rule_id)
+
+    def test_validation_checks_transaction_and_import_row_types(self) -> None:
+        sheets = InMemorySheetsClient()
+        gateway = GoogleWorkbookFactory(sheets).create("Family Spending")
+        gateway.provision_schema()
+        sheets.write_rows(
+            gateway.workbook_id,
+            "Transactions",
+            3,
+            (
+                (
+                    "txn-1",
+                    "fingerprint-1",
+                    "statement-1",
+                    "amex",
+                    "unmasked",
+                    "member-1",
+                    "2026-07-01",
+                    "",
+                    "EXAMPLE",
+                    "EXAMPLE",
+                    "",
+                    "12.34",
+                    "purchase",
+                    "dining",
+                    True,
+                    True,
+                    "2026-07-02T00:00:00+00:00",
+                ),
+            ),
+        )
+
+        with self.assertRaisesRegex(ValueError, "masked"):
+            gateway.validate_schema()
+
+    def test_status_values_are_derived_from_import_audit_rows(self) -> None:
+        sheets = InMemorySheetsClient()
+        gateway = GoogleWorkbookFactory(sheets).create("Family Spending")
+        gateway.provision_schema()
+        sheets.write_rows(
+            gateway.workbook_id,
+            "Imports",
+            3,
+            (
+                (
+                    "import-1",
+                    "sample.pdf",
+                    "hash-1",
+                    "amex",
+                    "ending-12345",
+                    "2026-06-01/2026-07-01",
+                    "discrepancy",
+                    "1.25",
+                    "",
+                    3,
+                    "failed",
+                    "2026-07-02T00:00:00+00:00",
+                ),
+            ),
+        )
+
+        gateway.validate_schema()
+
+        self.assertEqual(1, gateway.unresolved_exception_count())
+        self.assertIsNone(gateway.latest_successful_import())
 
 
 class GoogleCredentialManagerContractTests(unittest.TestCase):

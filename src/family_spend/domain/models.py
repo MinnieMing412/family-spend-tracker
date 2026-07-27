@@ -6,7 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 
-def _validate_masked_account_identifier(value: str) -> None:
+def validate_masked_account_identifier(value: str) -> None:
     """Reject account identifiers that expose too many digits or lack masking."""
     if not isinstance(value, str):
         raise TypeError("masked account identifier must be a string")
@@ -176,7 +176,7 @@ class NormalizedTransaction:
             raise TypeError("posting_date must be a date or None")
         if not isinstance(self.amount, Money):
             raise TypeError("amount must be Money")
-        _validate_masked_account_identifier(self.account_id)
+        validate_masked_account_identifier(self.account_id)
         if self.transaction_type in _NEGATIVE_TRANSACTION_TYPES and self.amount.amount >= 0:
             raise ValueError(f"{self.transaction_type.value} amount must be negative")
         if self.transaction_type in _POSITIVE_TRANSACTION_TYPES and self.amount.amount <= 0:
@@ -227,7 +227,7 @@ class NormalizedStatement:
         """Validate institution, account masking, and the statement date range."""
         if not isinstance(self.institution, Institution):
             raise TypeError("institution must be an Institution")
-        _validate_masked_account_identifier(self.account_id)
+        validate_masked_account_identifier(self.account_id)
         if type(self.start_date) is not date:
             raise TypeError("start_date must be a date")
         if type(self.end_date) is not date:
@@ -316,7 +316,7 @@ class AccountConfig:
         """Validate the institution and ensure the displayed account is masked."""
         if not isinstance(self.institution, Institution):
             raise TypeError("institution must be an Institution")
-        _validate_masked_account_identifier(self.masked_identifier)
+        validate_masked_account_identifier(self.masked_identifier)
 
 
 @dataclass(frozen=True, slots=True)

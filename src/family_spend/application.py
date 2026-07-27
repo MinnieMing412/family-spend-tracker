@@ -85,6 +85,7 @@ class FamilySpendApplication:
             if workbook_url is None:
                 workbook = self._workbooks.create(workbook_name)
                 workbook.provision_schema()
+                workbook.validate_schema()
             else:
                 workbook = self._workbooks.connect(_workbook_id_from_url(workbook_url))
                 workbook.validate_schema()
@@ -125,6 +126,7 @@ class FamilySpendApplication:
         )
         latest_import = workbook.latest_successful_import()
         latest_import_text = latest_import.isoformat() if latest_import is not None else "none"
+        unresolved_exceptions = workbook.unresolved_exception_count()
         cache_text = str(self._cache_location) if self._cache_location is not None else "none"
         return (
             f"Connected workbook {settings.workbook_id}: "
@@ -132,7 +134,7 @@ class FamilySpendApplication:
             f"{len(configuration.accounts)} accounts.\n"
             f"Authenticated Google identity: {identity}\n"
             f"Last successful import: {latest_import_text}\n"
-            "Unresolved exceptions: none recorded\n"
+            f"Unresolved exceptions: {unresolved_exceptions}\n"
             f"Retained cache location: {cache_text}"
         )
 

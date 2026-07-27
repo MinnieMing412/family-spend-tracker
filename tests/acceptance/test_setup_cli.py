@@ -152,7 +152,7 @@ class SetupCliAcceptanceTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Authenticated Google identity: Test Google account", output)
         self.assertIn("Last successful import: none", output)
-        self.assertIn("Unresolved exceptions: none recorded", output)
+        self.assertIn("Unresolved exceptions: 0", output)
         self.assertIn("Retained cache location: /private/cache/family-spend", output)
 
     def test_disconnect_removes_local_access_but_keeps_the_workbook(self) -> None:

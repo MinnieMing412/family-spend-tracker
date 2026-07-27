@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Protocol, cast
 
 from family_spend.adapters.google_auth import GOOGLE_SHEETS_SCOPE
@@ -12,11 +13,16 @@ from family_spend.adapters.local import FileCredentialStore
 from family_spend.domain.models import (
     AccountConfig,
     CategoryConfig,
+    ImportStatus,
     Institution,
     MatchType,
     MemberConfig,
     MerchantRule,
+    Money,
+    ReconciliationStatus,
+    TransactionType,
     WorkbookConfig,
+    validate_masked_account_identifier,
 )
 from family_spend.workbook_schema import CATEGORY_SEEDS, SCHEMA_VERSION, WORKSHEET_SCHEMAS
 
@@ -260,6 +266,160 @@ def _as_int(value: object, *, location: str) -> int:
     raise ValueError(f"{location} must contain an integer")
 
 
+def _non_empty_string(value: object, *, location: str) -> str:
+    """Return a stripped string or raise a workbook compatibility error."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{location} must not be empty")
+    return value.strip()
+
+
+def _normalized_row(
+    row: tuple[object, ...],
+    *,
+    width: int,
+    location: str,
+) -> tuple[object, ...]:
+    """Pad omitted trailing blanks while rejecting rows wider than the schema."""
+    if len(row) > width:
+        raise ValueError(f"{location} has more values than the workbook schema")
+    return (*row, *("" for _ in range(width - len(row))))
+
+
+def _validate_unique_row_ids(
+    rows: tuple[tuple[object, ...], ...],
+    *,
+    location: str,
+) -> None:
+    """Reject blank or duplicate IDs in one authoritative worksheet."""
+    ids = tuple(_non_empty_string(row[0], location=f"{location}.id") for row in rows)
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"{location} IDs must be unique")
+
+
+def _validate_transaction_rows(rows: tuple[tuple[object, ...], ...]) -> None:
+    """Validate IDs and value types in authoritative transaction rows."""
+    _validate_unique_row_ids(rows, location="Transactions")
+    fingerprints: list[str] = []
+    for row in rows:
+        fingerprints.append(
+            _non_empty_string(row[1], location="Transactions.fingerprint")
+        )
+        _non_empty_string(row[2], location="Transactions.statement_id")
+        Institution(_non_empty_string(row[3], location="Transactions.institution"))
+        validate_masked_account_identifier(
+            _non_empty_string(row[4], location="Transactions.account_id")
+        )
+        _non_empty_string(row[5], location="Transactions.member_id")
+        date.fromisoformat(
+            _non_empty_string(row[6], location="Transactions.transaction_date")
+        )
+        if row[7]:
+            date.fromisoformat(str(row[7]))
+        _non_empty_string(row[8], location="Transactions.raw_description")
+        _non_empty_string(row[9], location="Transactions.normalized_merchant")
+        Money(Decimal(_non_empty_string(row[11], location="Transactions.amount")))
+        TransactionType(_non_empty_string(row[12], location="Transactions.transaction_type"))
+        _non_empty_string(row[13], location="Transactions.category_id")
+        _as_bool(row[14], location="Transactions.included_in_spend")
+        _as_bool(row[15], location="Transactions.reviewed")
+        datetime.fromisoformat(
+            _non_empty_string(row[16], location="Transactions.imported_at")
+        )
+    if len(set(fingerprints)) != len(fingerprints):
+        raise ValueError("Transactions fingerprints must be unique")
+
+
+def _validate_import_rows(rows: tuple[tuple[object, ...], ...]) -> None:
+    """Validate IDs and value types in authoritative import audit rows."""
+    _validate_unique_row_ids(rows, location="Imports")
+    statement_hashes: list[str] = []
+    for row in rows:
+        _non_empty_string(row[1], location="Imports.source_name")
+        statement_hashes.append(
+            _non_empty_string(row[2], location="Imports.statement_hash")
+        )
+        Institution(_non_empty_string(row[3], location="Imports.institution"))
+        validate_masked_account_identifier(
+            _non_empty_string(row[4], location="Imports.account_id")
+        )
+        _non_empty_string(row[5], location="Imports.statement_period")
+        reconciliation = ReconciliationStatus(
+            _non_empty_string(row[6], location="Imports.reconciliation_status")
+        )
+        Money(Decimal(_non_empty_string(row[7], location="Imports.reconciliation_difference")))
+        if reconciliation is ReconciliationStatus.OVERRIDDEN:
+            _non_empty_string(row[8], location="Imports.override_reason")
+        if _as_int(row[9], location="Imports.transaction_count") < 0:
+            raise ValueError("Imports.transaction_count must not be negative")
+        ImportStatus(_non_empty_string(row[10], location="Imports.status"))
+        datetime.fromisoformat(
+            _non_empty_string(row[11], location="Imports.imported_at")
+        )
+    if len(set(statement_hashes)) != len(statement_hashes):
+        raise ValueError("Imports statement hashes must be unique")
+
+
+def _data_rows(
+    worksheet: str,
+    raw_rows: tuple[tuple[object, ...], ...],
+) -> tuple[tuple[object, ...], ...]:
+    """Normalize populated data rows to the worksheet's declared width."""
+    schema = next(item for item in WORKSHEET_SCHEMAS if item.name == worksheet)
+    return tuple(
+        _normalized_row(
+            row,
+            width=len(schema.columns),
+            location=worksheet,
+        )
+        for row in raw_rows
+        if any(value != "" for value in row)
+    )
+
+
+def _validate_sheet_data(
+    worksheet: str,
+    raw_rows: tuple[tuple[object, ...], ...],
+) -> None:
+    """Validate IDs and cell value types for one authoritative worksheet."""
+    if worksheet == "Dashboard":
+        return
+    rows = _data_rows(worksheet, raw_rows)
+    if worksheet == "Transactions":
+        _validate_transaction_rows(rows)
+        return
+    if worksheet == "Imports":
+        _validate_import_rows(rows)
+        return
+    _validate_unique_row_ids(rows, location=worksheet)
+    for row in rows:
+        if worksheet == "Members":
+            _non_empty_string(row[1], location="Members.display_name")
+            if not isinstance(row[2], str):
+                raise ValueError("Members.aliases must contain text")
+            _as_bool(row[3], location="Members.active")
+        elif worksheet == "Accounts":
+            Institution(_non_empty_string(row[1], location="Accounts.institution"))
+            validate_masked_account_identifier(
+                _non_empty_string(row[2], location="Accounts.masked_identifier")
+            )
+            _non_empty_string(row[3], location="Accounts.default_member_id")
+            _non_empty_string(row[4], location="Accounts.display_name")
+            _as_bool(row[5], location="Accounts.active")
+        elif worksheet == "Categories":
+            _non_empty_string(row[1], location="Categories.display_name")
+            _as_int(row[2], location="Categories.sort_order")
+            _as_bool(row[3], location="Categories.active")
+        elif worksheet == "Merchant Rules":
+            MatchType(_non_empty_string(row[1], location="Merchant Rules.match_type"))
+            _non_empty_string(row[2], location="Merchant Rules.match_value")
+            _non_empty_string(row[3], location="Merchant Rules.normalized_merchant")
+            _non_empty_string(row[4], location="Merchant Rules.category_id")
+            _as_int(row[5], location="Merchant Rules.priority")
+            _as_bool(row[6], location="Merchant Rules.active")
+            if row[7]:
+                datetime.fromisoformat(str(row[7]))
+
+
 class GoogleWorkbookGateway:
     """Workbook gateway bound to one Google spreadsheet identifier."""
 
@@ -292,6 +452,8 @@ class GoogleWorkbookGateway:
                 len(existing_rows) < 2 or existing_rows[:2] != expected_headers
             ):
                 raise ValueError(f"worksheet columns are incompatible: {schema.name}")
+            if existing_rows:
+                _validate_sheet_data(schema.name, existing_rows[2:])
 
         if "Transactions" not in names and names == ("Sheet1",):
             self._client.rename_worksheet(
@@ -351,6 +513,7 @@ class GoogleWorkbookGateway:
             expected_headers = tuple(column.header for column in schema.columns)
             if len(rows) < 2 or rows[0] != expected_keys or rows[1] != expected_headers:
                 raise ValueError(f"worksheet columns are incompatible: {schema.name}")
+            _validate_sheet_data(schema.name, rows[2:])
         self._load_configuration()
 
     def load_configuration(self) -> WorkbookConfig:
@@ -360,7 +523,10 @@ class GoogleWorkbookGateway:
 
     def latest_successful_import(self) -> datetime | None:
         """Return the newest completed import timestamp recorded in the workbook."""
-        rows = self._client.read_rows(self.workbook_id, "Imports")[2:]
+        rows = _data_rows(
+            "Imports",
+            self._client.read_rows(self.workbook_id, "Imports")[2:],
+        )
         timestamps: list[datetime] = []
         for row in rows:
             if len(row) < 12 or str(row[10]) != "complete" or not row[11]:
@@ -368,11 +534,39 @@ class GoogleWorkbookGateway:
             timestamps.append(datetime.fromisoformat(str(row[11])))
         return max(timestamps, default=None)
 
+    def unresolved_exception_count(self) -> int:
+        """Count failed, pending, or unreconciled import audit rows."""
+        rows = _data_rows(
+            "Imports",
+            self._client.read_rows(self.workbook_id, "Imports")[2:],
+        )
+        return sum(
+            str(row[10]) in {ImportStatus.PENDING.value, ImportStatus.FAILED.value}
+            or str(row[6])
+            in {
+                ReconciliationStatus.DISCREPANCY.value,
+                ReconciliationStatus.UNAVAILABLE.value,
+            }
+            for row in rows
+        )
+
     def _load_configuration(self) -> WorkbookConfig:
-        member_rows = self._client.read_rows(self.workbook_id, "Members")[2:]
-        account_rows = self._client.read_rows(self.workbook_id, "Accounts")[2:]
-        category_rows = self._client.read_rows(self.workbook_id, "Categories")[2:]
-        rule_rows = self._client.read_rows(self.workbook_id, "Merchant Rules")[2:]
+        member_rows = _data_rows(
+            "Members",
+            self._client.read_rows(self.workbook_id, "Members")[2:],
+        )
+        account_rows = _data_rows(
+            "Accounts",
+            self._client.read_rows(self.workbook_id, "Accounts")[2:],
+        )
+        category_rows = _data_rows(
+            "Categories",
+            self._client.read_rows(self.workbook_id, "Categories")[2:],
+        )
+        rule_rows = _data_rows(
+            "Merchant Rules",
+            self._client.read_rows(self.workbook_id, "Merchant Rules")[2:],
+        )
         members = tuple(
             MemberConfig(
                 member_id=str(row[0]),
@@ -381,7 +575,6 @@ class GoogleWorkbookGateway:
                 active=_as_bool(row[3], location="Members.active"),
             )
             for row in member_rows
-            if any(value != "" for value in row)
         )
         accounts = tuple(
             AccountConfig(
@@ -393,7 +586,6 @@ class GoogleWorkbookGateway:
                 active=_as_bool(row[5], location="Accounts.active"),
             )
             for row in account_rows
-            if any(value != "" for value in row)
         )
         categories = tuple(
             CategoryConfig(
@@ -403,7 +595,6 @@ class GoogleWorkbookGateway:
                 active=_as_bool(row[3], location="Categories.active"),
             )
             for row in category_rows
-            if any(value != "" for value in row)
         )
         rules = tuple(
             MerchantRule(
@@ -417,7 +608,6 @@ class GoogleWorkbookGateway:
                 updated_at=datetime.fromisoformat(str(row[7])) if row[7] else None,
             )
             for row in rule_rows
-            if any(value != "" for value in row)
         )
         return WorkbookConfig(members, accounts, categories, rules)
 

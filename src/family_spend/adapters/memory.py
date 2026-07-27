@@ -171,6 +171,13 @@ class InMemoryWorkbookGateway:
         )
         return max(timestamps, default=None)
 
+    def unresolved_exception_count(self) -> int:
+        """Count imports that have not reached a completed or skipped state."""
+        return sum(
+            record.status in {ImportStatus.PENDING, ImportStatus.FAILED}
+            for record in self._imports_by_hash.values()
+        )
+
     def find_import_by_hash(self, statement_hash: str) -> ImportRecord | None:
         """Find a previously committed import by statement content hash."""
         return self._imports_by_hash.get(statement_hash)
