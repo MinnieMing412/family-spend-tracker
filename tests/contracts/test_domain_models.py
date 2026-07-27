@@ -19,6 +19,10 @@ from family_spend.domain.models import (
     Money,
     NormalizedStatement,
     NormalizedTransaction,
+    ReconciliationResult,
+    ReconciliationStatus,
+    ReviewState,
+    ReviewStatus,
     TransactionType,
     WarningSeverity,
     WorkbookConfig,
@@ -285,6 +289,45 @@ class ConstrainedValueContractTests(unittest.TestCase):
 
         self.assertEqual(ImportStatus.COMPLETE, result.status)
         self.assertEqual(WarningSeverity.WARNING, WarningSeverity("warning"))
+
+    def test_reconciliation_rejects_an_unsupported_status(self) -> None:
+        with self.assertRaisesRegex(TypeError, "status"):
+            ReconciliationResult(
+                status=cast(Any, "overridden"),
+                lines=(),
+            )
+
+    def test_review_state_rejects_an_unsupported_status(self) -> None:
+        reconciliation = ReconciliationResult(
+            status=ReconciliationStatus.MATCHED,
+            lines=(),
+        )
+
+        with self.assertRaisesRegex(TypeError, "status"):
+            ReviewState(
+                statement=make_statement(),
+                status=cast(Any, "unsupported"),
+                reconciliation=reconciliation,
+            )
+
+    def test_overridden_reconciliation_requires_a_reason(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires a reason"):
+            ReconciliationResult(
+                status=ReconciliationStatus.OVERRIDDEN,
+                lines=(),
+            )
+
+        state = ReviewState(
+            statement=make_statement(),
+            status=ReviewStatus.APPROVED,
+            reconciliation=ReconciliationResult(
+                status=ReconciliationStatus.OVERRIDDEN,
+                lines=(),
+                override_reason="Reviewed statement discrepancy",
+            ),
+        )
+
+        self.assertEqual(ReviewStatus.APPROVED, state.status)
 
 
 if __name__ == "__main__":

@@ -220,6 +220,8 @@ class ReconciliationResult:
     override_reason: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.status, ReconciliationStatus):
+            raise TypeError("status must be a ReconciliationStatus")
         if self.status is ReconciliationStatus.OVERRIDDEN and not self.override_reason:
             raise ValueError("an overridden reconciliation requires a reason")
 
@@ -230,6 +232,10 @@ class ReviewState:
     status: ReviewStatus
     reconciliation: ReconciliationResult
     saved_rule_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, ReviewStatus):
+            raise TypeError("status must be a ReviewStatus")
 
 
 @dataclass(frozen=True, slots=True)
