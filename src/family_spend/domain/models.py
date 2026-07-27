@@ -7,6 +7,7 @@ from enum import StrEnum
 
 
 def _validate_masked_account_identifier(value: str) -> None:
+    """Reject account identifiers that expose too many digits or lack masking."""
     if not isinstance(value, str):
         raise TypeError("masked account identifier must be a string")
     digit_count = sum(character.isdigit() for character in value)
@@ -18,12 +19,16 @@ def _validate_masked_account_identifier(value: str) -> None:
 
 
 class Institution(StrEnum):
+    """Financial institutions supported by the first product release."""
+
     AMEX = "amex"
     BANK_OF_AMERICA = "bank_of_america"
     CHASE = "chase"
 
 
 class TransactionType(StrEnum):
+    """Normalized kinds of activity that can appear on a statement."""
+
     PURCHASE = "purchase"
     MERCHANT_CREDIT = "merchant_credit"
     FEE = "fee"
@@ -52,17 +57,23 @@ _NEGATIVE_TRANSACTION_TYPES = frozenset(
 
 
 class WarningSeverity(StrEnum):
+    """Importance levels for parsing and reconciliation warnings."""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
 
 
 class MatchType(StrEnum):
+    """Ways a merchant rule can compare its value to transaction text."""
+
     EXACT = "exact"
     CONTAINS = "contains"
 
 
 class ReconciliationStatus(StrEnum):
+    """Possible outcomes when extracted totals are checked against a statement."""
+
     MATCHED = "matched"
     DISCREPANCY = "discrepancy"
     OVERRIDDEN = "overridden"
@@ -70,12 +81,16 @@ class ReconciliationStatus(StrEnum):
 
 
 class ReviewStatus(StrEnum):
+    """Possible states of a user's statement review."""
+
     PENDING = "pending"
     APPROVED = "approved"
     CANCELLED = "cancelled"
 
 
 class ImportStatus(StrEnum):
+    """Lifecycle states for a workbook import."""
+
     PENDING = "pending"
     COMPLETE = "complete"
     FAILED = "failed"
@@ -84,10 +99,16 @@ class ImportStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Money:
+    """An exact decimal amount in US dollars.
+
+    `Decimal` avoids the rounding errors associated with floating-point numbers.
+    """
+
     amount: Decimal
     currency: str = "USD"
 
     def __post_init__(self) -> None:
+        """Validate that the amount is finite and the currency is USD."""
         if not isinstance(self.amount, Decimal):
             raise TypeError("money amount must be a Decimal")
         if not self.amount.is_finite():
@@ -96,6 +117,7 @@ class Money:
             raise ValueError("v1 supports USD only")
 
     def __add__(self, other: object) -> Money:
+        """Add two monetary values that use the same currency."""
         if not isinstance(other, Money):
             return NotImplemented
         if self.currency != other.currency:
@@ -103,6 +125,7 @@ class Money:
         return Money(self.amount + other.amount, self.currency)
 
     def __sub__(self, other: object) -> Money:
+        """Subtract two monetary values that use the same currency."""
         if not isinstance(other, Money):
             return NotImplemented
         if self.currency != other.currency:
@@ -112,6 +135,8 @@ class Money:
 
 @dataclass(frozen=True, slots=True)
 class NormalizedTransaction:
+    """One bank transaction converted into the application's common format."""
+
     transaction_id: str
     institution: Institution
     account_id: str
@@ -132,6 +157,7 @@ class NormalizedTransaction:
     source_metadata: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
+        """Validate dates, account masking, type values, and amount direction."""
         if not isinstance(self.institution, Institution):
             raise TypeError("institution must be an Institution")
         if not isinstance(self.transaction_type, TransactionType):
@@ -151,12 +177,16 @@ class NormalizedTransaction:
 
 @dataclass(frozen=True, slots=True)
 class StatementTotal:
+    """A total reported by a named section of the original statement."""
+
     section: str
     amount: Money
 
 
 @dataclass(frozen=True, slots=True)
 class DomainWarning:
+    """A structured warning linked to parsing evidence or a transaction."""
+
     code: str
     message: str
     severity: WarningSeverity
@@ -164,12 +194,15 @@ class DomainWarning:
     transaction_id: str | None = None
 
     def __post_init__(self) -> None:
+        """Validate that the warning uses a supported severity."""
         if not isinstance(self.severity, WarningSeverity):
             raise TypeError("severity must be a WarningSeverity")
 
 
 @dataclass(frozen=True, slots=True)
 class NormalizedStatement:
+    """A complete statement represented independently of its bank's PDF layout."""
+
     statement_id: str
     source_name: str
     source_hash: str
@@ -183,6 +216,7 @@ class NormalizedStatement:
     warnings: tuple[DomainWarning, ...]
 
     def __post_init__(self) -> None:
+        """Validate institution, account masking, and the statement date range."""
         if not isinstance(self.institution, Institution):
             raise TypeError("institution must be an Institution")
         _validate_masked_account_identifier(self.account_id)
@@ -198,28 +232,36 @@ class NormalizedStatement:
 
 @dataclass(frozen=True, slots=True)
 class ParseResult:
+    """The normalized statement and warnings produced by a statement parser."""
+
     statement: NormalizedStatement
     warnings: tuple[DomainWarning, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class ReconciliationLine:
+    """Comparison between one reported statement total and its extracted total."""
+
     section: str
     reported: Money
     extracted: Money
 
     @property
     def difference(self) -> Money:
+        """Return extracted minus reported for this reconciliation section."""
         return self.extracted - self.reported
 
 
 @dataclass(frozen=True, slots=True)
 class ReconciliationResult:
+    """Overall result of comparing extracted activity with statement totals."""
+
     status: ReconciliationStatus
     lines: tuple[ReconciliationLine, ...]
     override_reason: str | None = None
 
     def __post_init__(self) -> None:
+        """Validate the status and require an explanation for manual overrides."""
         if not isinstance(self.status, ReconciliationStatus):
             raise TypeError("status must be a ReconciliationStatus")
         if self.status is ReconciliationStatus.OVERRIDDEN and not self.override_reason:
@@ -228,18 +270,23 @@ class ReconciliationResult:
 
 @dataclass(frozen=True, slots=True)
 class ReviewState:
+    """A statement's reconciliation and current user-review decision."""
+
     statement: NormalizedStatement
     status: ReviewStatus
     reconciliation: ReconciliationResult
     saved_rule_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        """Validate that the review uses a supported status."""
         if not isinstance(self.status, ReviewStatus):
             raise TypeError("status must be a ReviewStatus")
 
 
 @dataclass(frozen=True, slots=True)
 class MemberConfig:
+    """A family member available for transaction ownership assignment."""
+
     member_id: str
     display_name: str
     aliases: tuple[str, ...]
@@ -248,6 +295,8 @@ class MemberConfig:
 
 @dataclass(frozen=True, slots=True)
 class AccountConfig:
+    """A configured financial account assigned to a default family member."""
+
     account_id: str
     institution: Institution
     masked_identifier: str
@@ -256,6 +305,7 @@ class AccountConfig:
     active: bool
 
     def __post_init__(self) -> None:
+        """Validate the institution and ensure the displayed account is masked."""
         if not isinstance(self.institution, Institution):
             raise TypeError("institution must be an Institution")
         _validate_masked_account_identifier(self.masked_identifier)
@@ -263,6 +313,8 @@ class AccountConfig:
 
 @dataclass(frozen=True, slots=True)
 class CategoryConfig:
+    """A spending category displayed in review tools and analysis charts."""
+
     category_id: str
     display_name: str
     sort_order: int
@@ -271,6 +323,8 @@ class CategoryConfig:
 
 @dataclass(frozen=True, slots=True)
 class MerchantRule:
+    """A reusable rule that normalizes and categorizes matching merchants."""
+
     rule_id: str
     match_type: MatchType
     match_value: str
@@ -281,18 +335,22 @@ class MerchantRule:
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        """Validate that the rule uses a supported matching strategy."""
         if not isinstance(self.match_type, MatchType):
             raise TypeError("match_type must be a MatchType")
 
 
 @dataclass(frozen=True, slots=True)
 class WorkbookConfig:
+    """All user-editable configuration loaded from the Google workbook."""
+
     members: tuple[MemberConfig, ...]
     accounts: tuple[AccountConfig, ...]
     categories: tuple[CategoryConfig, ...]
     merchant_rules: tuple[MerchantRule, ...]
 
     def __post_init__(self) -> None:
+        """Reject merchant rules that reference categories that do not exist."""
         category_ids = {category.category_id for category in self.categories}
         for rule in self.merchant_rules:
             if rule.category_id not in category_ids:
@@ -301,12 +359,16 @@ class WorkbookConfig:
 
 @dataclass(frozen=True, slots=True)
 class LocalSettings:
+    """Local references needed to reconnect to a Google Sheets workbook."""
+
     workbook_id: str
     credential_reference: str
 
 
 @dataclass(frozen=True, slots=True)
 class ImportRecord:
+    """Audit record for a statement import already written to the workbook."""
+
     import_id: str
     statement_hash: str
     status: ImportStatus
@@ -314,12 +376,15 @@ class ImportRecord:
     imported_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        """Validate that the import uses a supported status."""
         if not isinstance(self.status, ImportStatus):
             raise TypeError("status must be an ImportStatus")
 
 
 @dataclass(frozen=True, slots=True)
 class ApprovedImport:
+    """A reviewed and reconciled statement ready for atomic workbook storage."""
+
     import_id: str
     statement: NormalizedStatement
     reconciliation: ReconciliationResult
@@ -328,18 +393,23 @@ class ApprovedImport:
 
 @dataclass(frozen=True, slots=True)
 class ImportResult:
+    """Outcome returned after attempting to commit a statement import."""
+
     import_id: str
     status: ImportStatus
     transaction_ids: tuple[str, ...]
     message: str
 
     def __post_init__(self) -> None:
+        """Validate that the result uses a supported import status."""
         if not isinstance(self.status, ImportStatus):
             raise TypeError("status must be an ImportStatus")
 
 
 @dataclass(frozen=True, slots=True)
 class BackfillCheckpoint:
+    """Saved progress for a resumable historical statement backfill."""
+
     root_id: str
     plan_hash: str
     completed_statement_hashes: tuple[str, ...]
@@ -348,6 +418,8 @@ class BackfillCheckpoint:
 
 @dataclass(frozen=True, slots=True)
 class StructuredCacheRecord:
+    """Structured parser data that can be retained without storing raw PDF text."""
+
     cache_id: str
     statement_hash: str
     fields: tuple[tuple[str, str], ...]

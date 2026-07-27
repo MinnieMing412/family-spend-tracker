@@ -10,11 +10,15 @@ from family_spend.errors import FamilySpendError
 
 
 class RedactingArgumentParser(argparse.ArgumentParser):
+    """Convert command-line syntax errors into errors that can be safely redacted."""
+
     def error(self, message: str) -> Never:
+        """Raise a user-facing error instead of printing and exiting immediately."""
         raise FamilySpendError(message, exit_code=2)
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Define the available commands and options for the `family-spend` CLI."""
     parser = RedactingArgumentParser(
         prog="family-spend",
         description="Import reviewed family statement transactions into Google Sheets.",
@@ -45,6 +49,11 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
+    """Run one CLI command and return its process exit code.
+
+    Output streams and the application can be replaced in tests. Expected and
+    unexpected failures are converted to redacted messages before they reach users.
+    """
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     try:
