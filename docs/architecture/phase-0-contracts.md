@@ -6,6 +6,8 @@ Phase 0 creates stable boundaries for later implementation phases. Domain logic 
 
 The `family-spend` CLI is the primary acceptance seam. Tests run the public command surface and assert exit status, redacted output, and resulting boundary state.
 
+The CLI accepts an application built from boundary ports, allowing acceptance tests to run real command behavior with in-memory settings and workbook adapters. Stable domain-record constructors are a secondary public contract seam for runtime validation.
+
 ## Domain records
 
 The normalized contract includes:
@@ -39,4 +41,4 @@ In-memory settings, workbook, checkpoint, and structured-cache adapters expose f
 
 ## Error boundary
 
-Domain and adapter failures become actionable CLI messages at the outer boundary. Redaction removes OAuth-style tokens and email addresses and masks long account/card numbers to their final four digits.
+Domain and adapter failures become actionable CLI messages at the outer boundary. Argument-parser errors use the same boundary. Redaction removes OAuth-style tokens and email addresses and masks contiguous, spaced, or hyphenated account/card numbers to their final four digits.

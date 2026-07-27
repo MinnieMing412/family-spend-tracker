@@ -5,11 +5,12 @@ from dataclasses import dataclass
 
 _TOKEN_PATTERN = re.compile(r"\b(?:gh[opsu]_|ya29\.)[A-Za-z0-9._-]{10,}\b")
 _EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-_ACCOUNT_PATTERN = re.compile(r"\b\d{9,19}\b")
+_ACCOUNT_PATTERN = re.compile(r"(?<!\d)(?:\d[ -]?){8,18}\d(?!\d)")
 
 
 def _mask_account(match: re.Match[str]) -> str:
-    return f"ending-{match.group(0)[-4:]}"
+    digits = re.sub(r"\D", "", match.group(0))
+    return f"ending-{digits[-4:]}"
 
 
 def redact(message: str) -> str:

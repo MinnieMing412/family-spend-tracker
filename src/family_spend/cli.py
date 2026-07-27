@@ -3,10 +3,19 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from typing import Never, TextIO
+
+from family_spend.application import CliApplication
+from family_spend.errors import FamilySpendError
+
+
+class RedactingArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> Never:
+        raise FamilySpendError(message, exit_code=2)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = RedactingArgumentParser(
         prog="family-spend",
         description="Import reviewed family statement transactions into Google Sheets.",
     )
@@ -29,14 +38,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    arguments = parser.parse_args(argv)
-    if arguments.command is None:
-        parser.print_help()
-        return 0
-    print(
-        f"The '{arguments.command}' command is not implemented yet.",
-        file=sys.stderr,
-    )
-    return 2
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    application: CliApplication | None = None,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> int:
+    stdout = stdout or sys.stdout
+    stderr = stderr or sys.stderr
+    try:
+        parser = build_parser()
+        arguments = parser.parse_args(argv)
+        if arguments.command is None:
+            parser.print_help(file=stdout)
+            return 0
+        if arguments.command == "status" and application is not None:
+            print(application.status(), file=stdout)
+            return 0
+        print(
+            f"The '{arguments.command}' command is not implemented yet.",
+            file=stderr,
+        )
+        return 2
+    except FamilySpendError as error:
+        print(error.user_message(), file=stderr)
+        return error.exit_code

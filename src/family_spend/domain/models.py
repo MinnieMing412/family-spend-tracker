@@ -6,6 +6,17 @@ from decimal import Decimal
 from enum import StrEnum
 
 
+def _validate_masked_account_identifier(value: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError("masked account identifier must be a string")
+    digit_count = sum(character.isdigit() for character in value)
+    marker_present = any(
+        marker in value.lower() for marker in ("ending", "*", "x", "•", "…")
+    )
+    if not marker_present or not 4 <= digit_count <= 8:
+        raise ValueError("account identifier must contain only a masked account identifier")
+
+
 class Institution(StrEnum):
     AMEX = "amex"
     BANK_OF_AMERICA = "bank_of_america"
@@ -22,6 +33,22 @@ class TransactionType(StrEnum):
     CASH_ADVANCE = "cash_advance"
     REWARDS = "rewards"
     OTHER = "other"
+
+
+_POSITIVE_TRANSACTION_TYPES = frozenset(
+    {
+        TransactionType.PURCHASE,
+        TransactionType.FEE,
+        TransactionType.INTEREST,
+        TransactionType.CASH_ADVANCE,
+    }
+)
+_NEGATIVE_TRANSACTION_TYPES = frozenset(
+    {
+        TransactionType.MERCHANT_CREDIT,
+        TransactionType.PAYMENT,
+    }
+)
 
 
 class WarningSeverity(StrEnum):
@@ -105,14 +132,21 @@ class NormalizedTransaction:
     source_metadata: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
-        digit_count = sum(character.isdigit() for character in self.account_id)
-        if digit_count > 8:
-            raise ValueError("account_id must contain only a masked account identifier")
-        if (
-            self.transaction_type in {TransactionType.MERCHANT_CREDIT, TransactionType.PAYMENT}
-            and self.amount.amount >= 0
-        ):
+        if not isinstance(self.institution, Institution):
+            raise TypeError("institution must be an Institution")
+        if not isinstance(self.transaction_type, TransactionType):
+            raise TypeError("transaction_type must be a TransactionType")
+        if not isinstance(self.transaction_date, date):
+            raise TypeError("transaction_date must be a date")
+        if self.posting_date is not None and not isinstance(self.posting_date, date):
+            raise TypeError("posting_date must be a date or None")
+        if not isinstance(self.amount, Money):
+            raise TypeError("amount must be Money")
+        _validate_masked_account_identifier(self.account_id)
+        if self.transaction_type in _NEGATIVE_TRANSACTION_TYPES and self.amount.amount >= 0:
             raise ValueError(f"{self.transaction_type.value} amount must be negative")
+        if self.transaction_type in _POSITIVE_TRANSACTION_TYPES and self.amount.amount <= 0:
+            raise ValueError(f"{self.transaction_type.value} amount must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +179,15 @@ class NormalizedStatement:
     warnings: tuple[DomainWarning, ...]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.institution, Institution):
+            raise TypeError("institution must be an Institution")
+        _validate_masked_account_identifier(self.account_id)
+        if not isinstance(self.start_date, date):
+            raise TypeError("start_date must be a date")
+        if not isinstance(self.end_date, date):
+            raise TypeError("end_date must be a date")
+        if not isinstance(self.closing_date, date):
+            raise TypeError("closing_date must be a date")
         if self.end_date < self.start_date:
             raise ValueError("statement date range must end on or after its start date")
 
@@ -201,6 +244,11 @@ class AccountConfig:
     default_member_id: str
     display_name: str
     active: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.institution, Institution):
+            raise TypeError("institution must be an Institution")
+        _validate_masked_account_identifier(self.masked_identifier)
 
 
 @dataclass(frozen=True, slots=True)

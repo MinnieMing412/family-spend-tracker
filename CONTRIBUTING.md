@@ -13,8 +13,9 @@
 Use only the approved public seams:
 
 1. The `family-spend` CLI is the primary acceptance seam.
-2. Institution parsers use the shared parser contract.
-3. Workbook adapters use the shared workbook gateway contract.
+2. Stable domain records use their public constructor contract.
+3. Institution parsers use the shared parser contract.
+4. Workbook adapters use the shared workbook gateway contract.
 
 Tests assert public results and resulting boundary state. They do not assert private calls, helper structure, terminal rendering internals, or library-specific objects.
 
@@ -36,3 +37,5 @@ Never commit:
 - Test snapshots containing household data
 
 Parser fixtures must be synthetic or irreversibly sanitized. Only masked account identifiers are permitted in source code, tests, fixtures, and logs.
+
+Privacy-boundary tests may construct synthetic unmasked identifiers at runtime from short, non-sensitive chunks. Never commit a complete unmasked identifier literal, and never print the constructed value.
