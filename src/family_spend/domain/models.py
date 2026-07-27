@@ -1,0 +1,283 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
+from enum import StrEnum
+
+
+class Institution(StrEnum):
+    AMEX = "amex"
+    BANK_OF_AMERICA = "bank_of_america"
+    CHASE = "chase"
+
+
+class TransactionType(StrEnum):
+    PURCHASE = "purchase"
+    MERCHANT_CREDIT = "merchant_credit"
+    FEE = "fee"
+    INTEREST = "interest"
+    PAYMENT = "payment"
+    TRANSFER = "transfer"
+    CASH_ADVANCE = "cash_advance"
+    REWARDS = "rewards"
+    OTHER = "other"
+
+
+class WarningSeverity(StrEnum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class MatchType(StrEnum):
+    EXACT = "exact"
+    CONTAINS = "contains"
+
+
+class ReconciliationStatus(StrEnum):
+    MATCHED = "matched"
+    DISCREPANCY = "discrepancy"
+    OVERRIDDEN = "overridden"
+    UNAVAILABLE = "unavailable"
+
+
+class ReviewStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    CANCELLED = "cancelled"
+
+
+class ImportStatus(StrEnum):
+    PENDING = "pending"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True, slots=True)
+class Money:
+    amount: Decimal
+    currency: str = "USD"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.amount, Decimal):
+            raise TypeError("money amount must be a Decimal")
+        if not self.amount.is_finite():
+            raise ValueError("money amount must be finite")
+        if self.currency != "USD":
+            raise ValueError("v1 supports USD only")
+
+    def __add__(self, other: object) -> Money:
+        if not isinstance(other, Money):
+            return NotImplemented
+        if self.currency != other.currency:
+            raise ValueError("cannot add money in different currencies")
+        return Money(self.amount + other.amount, self.currency)
+
+    def __sub__(self, other: object) -> Money:
+        if not isinstance(other, Money):
+            return NotImplemented
+        if self.currency != other.currency:
+            raise ValueError("cannot subtract money in different currencies")
+        return Money(self.amount - other.amount, self.currency)
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedTransaction:
+    transaction_id: str
+    institution: Institution
+    account_id: str
+    member_id: str | None
+    transaction_date: date
+    posting_date: date | None
+    raw_description: str
+    normalized_merchant: str
+    merchant_location: str | None
+    amount: Money
+    transaction_type: TransactionType
+    category_id: str | None
+    included_in_spend: bool
+    reviewed: bool
+    fingerprint: str | None = None
+    statement_id: str | None = None
+    imported_at: datetime | None = None
+    source_metadata: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        digit_count = sum(character.isdigit() for character in self.account_id)
+        if digit_count > 8:
+            raise ValueError("account_id must contain only a masked account identifier")
+        if (
+            self.transaction_type in {TransactionType.MERCHANT_CREDIT, TransactionType.PAYMENT}
+            and self.amount.amount >= 0
+        ):
+            raise ValueError(f"{self.transaction_type.value} amount must be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class StatementTotal:
+    section: str
+    amount: Money
+
+
+@dataclass(frozen=True, slots=True)
+class DomainWarning:
+    code: str
+    message: str
+    severity: WarningSeverity
+    evidence_ref: str | None = None
+    transaction_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedStatement:
+    statement_id: str
+    source_name: str
+    source_hash: str
+    institution: Institution
+    account_id: str
+    start_date: date
+    end_date: date
+    closing_date: date
+    transactions: tuple[NormalizedTransaction, ...]
+    reported_totals: tuple[StatementTotal, ...]
+    warnings: tuple[DomainWarning, ...]
+
+    def __post_init__(self) -> None:
+        if self.end_date < self.start_date:
+            raise ValueError("statement date range must end on or after its start date")
+
+
+@dataclass(frozen=True, slots=True)
+class ParseResult:
+    statement: NormalizedStatement
+    warnings: tuple[DomainWarning, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationLine:
+    section: str
+    reported: Money
+    extracted: Money
+
+    @property
+    def difference(self) -> Money:
+        return self.extracted - self.reported
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationResult:
+    status: ReconciliationStatus
+    lines: tuple[ReconciliationLine, ...]
+    override_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status is ReconciliationStatus.OVERRIDDEN and not self.override_reason:
+            raise ValueError("an overridden reconciliation requires a reason")
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewState:
+    statement: NormalizedStatement
+    status: ReviewStatus
+    reconciliation: ReconciliationResult
+    saved_rule_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MemberConfig:
+    member_id: str
+    display_name: str
+    aliases: tuple[str, ...]
+    active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AccountConfig:
+    account_id: str
+    institution: Institution
+    masked_identifier: str
+    default_member_id: str
+    display_name: str
+    active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CategoryConfig:
+    category_id: str
+    display_name: str
+    sort_order: int
+    active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class MerchantRule:
+    rule_id: str
+    match_type: MatchType
+    match_value: str
+    normalized_merchant: str
+    category_id: str
+    priority: int
+    active: bool
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbookConfig:
+    members: tuple[MemberConfig, ...]
+    accounts: tuple[AccountConfig, ...]
+    categories: tuple[CategoryConfig, ...]
+    merchant_rules: tuple[MerchantRule, ...]
+
+    def __post_init__(self) -> None:
+        category_ids = {category.category_id for category in self.categories}
+        for rule in self.merchant_rules:
+            if rule.category_id not in category_ids:
+                raise ValueError(f"merchant rule references unknown category: {rule.category_id}")
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSettings:
+    workbook_id: str
+    credential_reference: str
+
+
+@dataclass(frozen=True, slots=True)
+class ImportRecord:
+    import_id: str
+    statement_hash: str
+    status: ImportStatus
+    transaction_ids: tuple[str, ...]
+    imported_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovedImport:
+    import_id: str
+    statement: NormalizedStatement
+    reconciliation: ReconciliationResult
+    reviewed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ImportResult:
+    import_id: str
+    status: ImportStatus
+    transaction_ids: tuple[str, ...]
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class BackfillCheckpoint:
+    root_id: str
+    plan_hash: str
+    completed_statement_hashes: tuple[str, ...]
+    failed_source_names: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredCacheRecord:
+    cache_id: str
+    statement_hash: str
+    fields: tuple[tuple[str, str], ...]
