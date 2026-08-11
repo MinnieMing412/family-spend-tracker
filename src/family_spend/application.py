@@ -5,6 +5,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 from family_spend.domain.models import LocalSettings
+from family_spend.ingestion import StatementIngestionService
 from family_spend.ports import (
     CredentialManager,
     SettingsStore,
@@ -49,6 +50,10 @@ class CliApplication(Protocol):
         """Remove local credentials and connection settings."""
         ...
 
+    def parse_summary(self, source: Path) -> str:
+        """Parse statement PDFs and summarize them without uploading data."""
+        ...
+
 
 class FamilySpendApplication:
     """Coordinate CLI requests using settings and workbook storage boundaries."""
@@ -61,6 +66,7 @@ class FamilySpendApplication:
         credentials: CredentialManager | None = None,
         workbooks: WorkbookFactory | None = None,
         cache_location: Path | None = None,
+        ingestion: StatementIngestionService | None = None,
     ) -> None:
         """Create the application with its local settings and workbook providers."""
         self._settings = settings
@@ -68,6 +74,7 @@ class FamilySpendApplication:
         self._credentials = credentials
         self._workbooks = workbooks
         self._cache_location = cache_location
+        self._ingestion = ingestion
 
     def setup(
         self,
@@ -159,3 +166,9 @@ class FamilySpendApplication:
         self._credentials.delete(settings.credential_reference)
         self._settings.delete()
         return "Local Google access removed. The Google workbook was not deleted."
+
+    def parse_summary(self, source: Path) -> str:
+        """Validate, detect, and parse statements without workbook writes."""
+        if self._ingestion is None:
+            raise ValueError("statement ingestion is not configured")
+        return self._ingestion.parse_summary(source)

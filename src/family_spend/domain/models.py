@@ -34,6 +34,14 @@ class Institution(StrEnum):
     CHASE = "chase"
 
 
+class DetectionStatus(StrEnum):
+    """Outcomes from institution marker detection."""
+
+    DETECTED = "detected"
+    UNSUPPORTED = "unsupported"
+    AMBIGUOUS = "ambiguous"
+
+
 class TransactionType(StrEnum):
     """Normalized kinds of activity that can appear on a statement."""
 
@@ -244,6 +252,26 @@ class ParseResult:
 
     statement: NormalizedStatement
     warnings: tuple[DomainWarning, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class InstitutionDetection:
+    """A parser-registry decision without retaining extracted statement text."""
+
+    status: DetectionStatus
+    institutions: tuple[Institution, ...]
+    evidence_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Ensure the status and candidate count agree."""
+        if not isinstance(self.status, DetectionStatus):
+            raise TypeError("detection status must be a DetectionStatus")
+        if self.status is DetectionStatus.DETECTED and len(self.institutions) != 1:
+            raise ValueError("detected status requires exactly one institution")
+        if self.status is DetectionStatus.UNSUPPORTED and self.institutions:
+            raise ValueError("unsupported status cannot include institutions")
+        if self.status is DetectionStatus.AMBIGUOUS and len(self.institutions) < 2:
+            raise ValueError("ambiguous status requires multiple institutions")
 
 
 @dataclass(frozen=True, slots=True)

@@ -14,6 +14,7 @@ from family_spend.adapters.memory import (
 )
 from family_spend.domain.models import (
     ApprovedImport,
+    DetectionStatus,
     ImportStatus,
     Institution,
     LocalSettings,
@@ -118,6 +119,7 @@ class ParserAdapterContractTests(unittest.TestCase):
             source_name: str
             sha256: str
             page_count: int
+            page_texts: tuple[str, ...]
 
         statement = NormalizedStatement(
             statement_id="statement-1",
@@ -140,10 +142,12 @@ class ParserAdapterContractTests(unittest.TestCase):
             source_name="sample.pdf",
             sha256="a" * 64,
             page_count=1,
+            page_texts=("Synthetic statement",),
         )
 
         selected_parser = registry.parser_for(source)
 
+        self.assertEqual(DetectionStatus.DETECTED, registry.detect(source).status)
         self.assertEqual(expected, selected_parser.parse(source))
 
 

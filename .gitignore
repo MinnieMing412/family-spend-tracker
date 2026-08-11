@@ -20,6 +20,8 @@ credentials/
 credentials.json
 token.json
 *.token.json
+.secrets
+*.secret.json
 
 # Statement data and parser artifacts
 statements/

@@ -1,0 +1,37 @@
+AMERICAN EXPRESS
+Synthetic Card Statement
+Account Ending 10005
+Billing Period 05/16/26 - 06/15/26
+Statement Closing Date 06/15/26
+
+Payments and Credits
+Total Payments -$1,000.00
+Total Credits $12.34 CR
+05/20/26* PAYMENT RECEIVED - THANK YOU -$1,000.00
+05/22/26 RETURNED MERCHANDISE $12.34 CR
+
+New Charges
+Total New Charges $358.01
+Cardmember: MEMBER ALPHA
+05/18/26 05/19/26 COFFEE SHOP $12.34
+05/21/26 MARKETPLACE
+SEATTLE WA $45.67
+Cardmember: MEMBER BETA
+05/23/26 ONLINE STORE $100.00
+
+AMERICAN EXPRESS
+Account Ending 10005
+New Charges
+Cardmember: MEMBER BETA
+05/24/26 TRAVEL SERVICE $200.00
+
+Fees
+Total Fees $25.00
+06/01/26 ANNUAL MEMBERSHIP FEE $25.00
+
+Interest Charged
+Total Interest Charged $5.00
+06/15/26 INTEREST CHARGE $5.00
+
+Cash Advances
+No Activity

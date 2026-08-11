@@ -2,7 +2,9 @@
 
 A privacy-conscious macOS CLI for importing AMEX, Bank of America, and Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
 
-The project is under active implementation. Phase 0 establishes the CLI, stable domain contracts, boundary ports, in-memory adapters, and acceptance-test harness.
+The project is under active implementation. The current foundation includes the
+domain contracts, Google workbook lifecycle, PDF validation and discovery, and a
+deterministic AMEX parser.
 
 ## Development setup
 
@@ -64,6 +66,20 @@ On macOS, the workbook reference and OAuth credentials are stored separately
 under `~/Library/Application Support/Family Spend Tracker/`. `disconnect`
 removes these local files and does not delete the Google workbook.
 
+## Parse AMEX statements
+
+Inspect one text-bearing AMEX statement without uploading any data:
+
+```bash
+family-spend import /path/to/statement.pdf
+```
+
+The same command accepts a directory and discovers PDFs recursively in stable
+relative-path order. It rejects encrypted, corrupt, scanned/image-only,
+unsupported, and ambiguous documents before parsing. The current Phase 2
+command prints only a parse summary; transaction review and workbook writes are
+added in later phases.
+
 ## Project documents
 
 - [Product requirements](docs/PRD.md)
@@ -71,6 +87,7 @@ removes these local files and does not delete the Google workbook.
 - [Agent phase specifications](docs/specs/)
 - [Phase 0 contracts](docs/architecture/phase-0-contracts.md)
 - [Phase 1 Google workbook architecture](docs/architecture/phase-1-google-workbook.md)
+- [Phase 2 PDF and AMEX parser architecture](docs/architecture/phase-2-amex-parser.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy
