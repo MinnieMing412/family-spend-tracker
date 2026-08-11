@@ -8,11 +8,13 @@ from typing import Any, cast
 from family_spend.domain.models import (
     AccountConfig,
     CategoryConfig,
+    DetectionStatus,
     DomainWarning,
     ImportRecord,
     ImportResult,
     ImportStatus,
     Institution,
+    InstitutionDetection,
     MatchType,
     MemberConfig,
     MerchantRule,
@@ -288,6 +290,12 @@ class WorkbookConfigContractTests(unittest.TestCase):
 
 
 class ConstrainedValueContractTests(unittest.TestCase):
+    def test_detection_status_requires_a_consistent_candidate_count(self) -> None:
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            InstitutionDetection(DetectionStatus.DETECTED, ())
+        with self.assertRaisesRegex(ValueError, "multiple"):
+            InstitutionDetection(DetectionStatus.AMBIGUOUS, (Institution.AMEX,))
+
     def test_warning_rejects_an_unsupported_severity(self) -> None:
         with self.assertRaisesRegex(TypeError, "severity"):
             DomainWarning(

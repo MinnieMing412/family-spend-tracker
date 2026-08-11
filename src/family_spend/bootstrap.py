@@ -10,6 +10,14 @@ from family_spend.adapters.local import (
     default_application_directory,
 )
 from family_spend.application import FamilySpendApplication
+from family_spend.domain.models import Institution
+from family_spend.ingestion import (
+    MarkerParserRegistry,
+    ParserRegistration,
+    PdfValidator,
+    StatementIngestionService,
+)
+from family_spend.parsers import AmexStatementParser
 
 
 def build_application() -> FamilySpendApplication:
@@ -20,9 +28,29 @@ def build_application() -> FamilySpendApplication:
     credentials = GoogleCredentialManager(credential_store)
     sheets = GoogleApiSheetsClient(credential_store)
     workbooks = GoogleWorkbookFactory(sheets)
+    amex_parser = AmexStatementParser()
+    ingestion = StatementIngestionService(
+        PdfValidator(),
+        MarkerParserRegistry(
+            (
+                ParserRegistration(
+                    institution=Institution.AMEX,
+                    markers=(
+                        "American Express",
+                        "Account Ending",
+                        "Payments and Credits",
+                        "New Charges",
+                    ),
+                    parser=amex_parser,
+                    minimum_markers=2,
+                ),
+            )
+        ),
+    )
     return FamilySpendApplication(
         settings=settings,
         credentials=credentials,
         workbooks=workbooks,
         cache_location=application_directory / "cache",
+        ingestion=ingestion,
     )

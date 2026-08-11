@@ -9,6 +9,7 @@ from family_spend.domain.models import (
     BackfillCheckpoint,
     ImportRecord,
     ImportResult,
+    InstitutionDetection,
     LocalSettings,
     NormalizedTransaction,
     ParseResult,
@@ -21,10 +22,30 @@ from family_spend.domain.models import (
 class ValidatedPdf(Protocol):
     """Metadata for a PDF that has already passed basic file validation."""
 
-    path: Path
-    source_name: str
-    sha256: str
-    page_count: int
+    @property
+    def path(self) -> Path:
+        """Return the local path used by the PDF adapter."""
+        ...
+
+    @property
+    def source_name(self) -> str:
+        """Return a display-safe source filename."""
+        ...
+
+    @property
+    def sha256(self) -> str:
+        """Return the exact PDF byte hash."""
+        ...
+
+    @property
+    def page_count(self) -> int:
+        """Return the validated page count."""
+        ...
+
+    @property
+    def page_texts(self) -> tuple[str, ...]:
+        """Return extracted text separated by source page."""
+        ...
 
 
 class StatementParser(Protocol):
@@ -40,6 +61,10 @@ class ParserRegistry(Protocol):
 
     def parser_for(self, source: ValidatedPdf) -> StatementParser:
         """Return a parser that supports the supplied PDF."""
+        ...
+
+    def detect(self, source: ValidatedPdf) -> InstitutionDetection:
+        """Return an explicit detected, unsupported, or ambiguous result."""
         ...
 
 

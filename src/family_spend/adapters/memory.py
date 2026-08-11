@@ -7,9 +7,12 @@ from family_spend.domain.models import (
     ApprovedImport,
     BackfillCheckpoint,
     CategoryConfig,
+    DetectionStatus,
     ImportRecord,
     ImportResult,
     ImportStatus,
+    Institution,
+    InstitutionDetection,
     LocalSettings,
     NormalizedTransaction,
     ParseResult,
@@ -45,6 +48,11 @@ class StaticParserRegistry:
         """Return the configured parser for any supplied PDF."""
         del source
         return self._parser
+
+    def detect(self, source: ValidatedPdf) -> InstitutionDetection:
+        """Return a deterministic AMEX detection for fake-adapter tests."""
+        del source
+        return InstitutionDetection(DetectionStatus.DETECTED, (Institution.AMEX,))
 
 
 class InMemorySettingsStore:

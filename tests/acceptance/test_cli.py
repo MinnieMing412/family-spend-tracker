@@ -41,7 +41,7 @@ class CliAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(command, result.stdout)
 
-    def test_unimplemented_import_fails_without_claiming_success(self) -> None:
+    def test_import_of_a_missing_source_fails_without_claiming_success(self) -> None:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(PROJECT_ROOT / "src")
 
@@ -55,7 +55,8 @@ class CliAcceptanceTests(unittest.TestCase):
         )
 
         self.assertEqual(2, result.returncode)
-        self.assertIn("not implemented yet", result.stderr)
+        self.assertIn("does not exist", result.stderr)
+        self.assertNotIn("Parse complete", result.stdout)
 
     def test_status_reads_injected_boundary_state(self) -> None:
         settings = InMemorySettingsStore()

@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--workbook-url")
 
     import_parser = commands.add_parser("import", help="Import a PDF or folder.")
-    import_parser.add_argument("source")
+    import_parser.add_argument("source", type=Path)
     import_parser.add_argument("--retain-cache", action="store_true")
 
     backfill_parser = commands.add_parser("backfill", help="Backfill a statement folder.")
@@ -73,6 +73,7 @@ def main(
             "status",
             "validate-workbook",
             "disconnect",
+            "import",
         }:
             from family_spend.bootstrap import build_application
 
@@ -95,6 +96,9 @@ def main(
             return 0
         if arguments.command == "disconnect" and application is not None:
             print(application.disconnect(), file=stdout)
+            return 0
+        if arguments.command == "import" and application is not None:
+            print(application.parse_summary(arguments.source), file=stdout)
             return 0
         print(
             f"The '{arguments.command}' command is not implemented yet.",

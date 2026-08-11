@@ -1,0 +1,24 @@
+{
+  "account_id": "ending-10005",
+  "start_date": "2026-05-16",
+  "end_date": "2026-06-15",
+  "closing_date": "2026-06-15",
+  "transaction_count": 8,
+  "transactions": [
+    ["2026-05-20", null, "payment", "-1000.00"],
+    ["2026-05-22", null, "merchant_credit", "-12.34"],
+    ["2026-05-18", "2026-05-19", "purchase", "12.34"],
+    ["2026-05-21", null, "purchase", "45.67"],
+    ["2026-05-23", null, "purchase", "100.00"],
+    ["2026-05-24", null, "purchase", "200.00"],
+    ["2026-06-01", null, "fee", "25.00"],
+    ["2026-06-15", null, "interest", "5.00"]
+  ],
+  "reported_totals": {
+    "payments": "-1000.00",
+    "credits": "-12.34",
+    "new_charges": "358.01",
+    "fees": "25.00",
+    "interest_charged": "5.00"
+  }
+}
