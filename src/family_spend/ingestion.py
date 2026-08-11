@@ -201,8 +201,9 @@ class StatementIngestionService:
         lines = []
         for result in results:
             statement = result.statement
+            institution_name = statement.institution.value.replace("_", " ").upper()
             lines.append(
-                f"Detected {statement.institution.value.upper()} statement "
+                f"Detected {institution_name} statement "
                 f"{statement.source_name}: {len(statement.transactions)} transactions, "
                 f"{len(statement.reported_totals)} reported totals, "
                 f"{len(result.warnings)} warnings."

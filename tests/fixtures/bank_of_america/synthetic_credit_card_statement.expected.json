@@ -1,0 +1,22 @@
+{
+  "account_id": "ending-4321",
+  "start_date": "2026-05-16",
+  "end_date": "2026-06-15",
+  "closing_date": "2026-06-15",
+  "transaction_count": 7,
+  "transactions": [
+    ["2026-05-20", "2026-05-20", "payment", "-500.00"],
+    ["2026-06-05", "2026-06-06", "merchant_credit", "-25.00"],
+    ["2026-05-18", "2026-05-19", "purchase", "75.25"],
+    ["2026-05-22", "2026-05-23", "purchase", "45.75"],
+    ["2026-06-01", "2026-06-02", "purchase", "100.00"],
+    ["2026-06-10", "2026-06-10", "fee", "29.00"],
+    ["2026-06-15", "2026-06-15", "interest", "4.00"]
+  ],
+  "reported_totals": {
+    "payments_and_other_credits": "-525.00",
+    "new_charges": "221.00",
+    "fees": "29.00",
+    "interest_charged": "4.00"
+  }
+}

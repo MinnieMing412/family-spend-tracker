@@ -225,6 +225,8 @@ def enrich_transaction(
 
 def _types_for_section(section: str) -> frozenset[TransactionType] | None:
     normalized = "_".join(section.casefold().replace("&", "and").split())
+    if normalized.startswith("payments_and_other_credits"):
+        return frozenset({TransactionType.PAYMENT, TransactionType.MERCHANT_CREDIT})
     if normalized.startswith("payments"):
         return frozenset({TransactionType.PAYMENT})
     if normalized.startswith("credits"):
