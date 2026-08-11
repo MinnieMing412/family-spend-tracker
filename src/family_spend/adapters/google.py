@@ -12,13 +12,17 @@ from family_spend.adapters.google_auth import GOOGLE_SHEETS_SCOPE
 from family_spend.adapters.local import FileCredentialStore
 from family_spend.domain.models import (
     AccountConfig,
+    ApprovedImport,
     CategoryConfig,
+    ImportRecord,
+    ImportResult,
     ImportStatus,
     Institution,
     MatchType,
     MemberConfig,
     MerchantRule,
     Money,
+    NormalizedTransaction,
     ReconciliationStatus,
     TransactionType,
     WorkbookConfig,
@@ -318,13 +322,20 @@ def _validate_transaction_rows(rows: tuple[tuple[object, ...], ...]) -> None:
         _non_empty_string(row[8], location="Transactions.raw_description")
         _non_empty_string(row[9], location="Transactions.normalized_merchant")
         Money(Decimal(_non_empty_string(row[11], location="Transactions.amount")))
-        TransactionType(_non_empty_string(row[12], location="Transactions.transaction_type"))
-        _non_empty_string(row[13], location="Transactions.category_id")
-        _as_bool(row[14], location="Transactions.included_in_spend")
+        transaction_type = TransactionType(
+            _non_empty_string(row[12], location="Transactions.transaction_type")
+        )
+        included = _as_bool(row[14], location="Transactions.included_in_spend")
+        if included:
+            _non_empty_string(row[13], location="Transactions.category_id")
+        elif row[13] and not isinstance(row[13], str):
+            raise ValueError("Transactions.category_id must contain text")
         _as_bool(row[15], location="Transactions.reviewed")
         datetime.fromisoformat(
             _non_empty_string(row[16], location="Transactions.imported_at")
         )
+        if transaction_type in {TransactionType.PAYMENT, TransactionType.TRANSFER} and included:
+            raise ValueError("non-spending transaction type cannot be included in spend")
     if len(set(fingerprints)) != len(fingerprints):
         raise ValueError("Transactions fingerprints must be unique")
 
@@ -472,6 +483,94 @@ def _configuration_from_rows(
     return WorkbookConfig(members, accounts, categories, rules)
 
 
+def _transaction_from_row(row: tuple[object, ...]) -> NormalizedTransaction:
+    """Convert one validated workbook row back into the normalized contract."""
+    return NormalizedTransaction(
+        transaction_id=str(row[0]),
+        fingerprint=str(row[1]),
+        statement_id=str(row[2]),
+        institution=Institution(str(row[3])),
+        account_id=str(row[4]),
+        member_id=str(row[5]),
+        transaction_date=date.fromisoformat(str(row[6])),
+        posting_date=date.fromisoformat(str(row[7])) if row[7] else None,
+        raw_description=str(row[8]),
+        normalized_merchant=str(row[9]),
+        merchant_location=str(row[10]) if row[10] else None,
+        amount=Money(Decimal(str(row[11]))),
+        transaction_type=TransactionType(str(row[12])),
+        category_id=str(row[13]) if row[13] else None,
+        included_in_spend=_as_bool(row[14], location="Transactions.included_in_spend"),
+        reviewed=_as_bool(row[15], location="Transactions.reviewed"),
+        imported_at=datetime.fromisoformat(str(row[16])),
+    )
+
+
+def _transaction_row(transaction: NormalizedTransaction) -> tuple[object, ...]:
+    """Serialize only approved normalized fields required by the workbook."""
+    if transaction.fingerprint is None or transaction.statement_id is None:
+        raise ValueError("approved transaction requires fingerprint and import ID")
+    if transaction.member_id is None or transaction.imported_at is None:
+        raise ValueError("approved transaction requires owner and imported timestamp")
+    return (
+        transaction.transaction_id,
+        transaction.fingerprint,
+        transaction.statement_id,
+        transaction.institution.value,
+        transaction.account_id,
+        transaction.member_id,
+        transaction.transaction_date.isoformat(),
+        transaction.posting_date.isoformat() if transaction.posting_date else "",
+        transaction.raw_description,
+        transaction.normalized_merchant,
+        transaction.merchant_location or "",
+        str(transaction.amount.amount),
+        transaction.transaction_type.value,
+        transaction.category_id or "",
+        transaction.included_in_spend,
+        transaction.reviewed,
+        transaction.imported_at.isoformat(),
+    )
+
+
+def _reconciliation_difference(approved: ApprovedImport) -> Decimal:
+    return sum(
+        (line.difference.amount for line in approved.reconciliation.lines),
+        Decimal("0"),
+    )
+
+
+def _import_row(approved: ApprovedImport, status: ImportStatus) -> tuple[object, ...]:
+    statement = approved.statement
+    return (
+        approved.import_id,
+        statement.source_name,
+        statement.source_hash,
+        statement.institution.value,
+        statement.account_id,
+        f"{statement.start_date.isoformat()}/{statement.end_date.isoformat()}",
+        approved.reconciliation.status.value,
+        str(_reconciliation_difference(approved)),
+        approved.reconciliation.override_reason or "",
+        len(statement.transactions),
+        status.value,
+        approved.reviewed_at.isoformat(),
+    )
+
+
+def _merchant_rule_row(rule: MerchantRule) -> tuple[object, ...]:
+    return (
+        rule.rule_id,
+        rule.match_type.value,
+        rule.match_value,
+        rule.normalized_merchant,
+        rule.category_id,
+        rule.priority,
+        rule.active,
+        rule.updated_at.isoformat() if rule.updated_at else "",
+    )
+
+
 class GoogleWorkbookGateway:
     """Workbook gateway bound to one Google spreadsheet identifier."""
 
@@ -614,6 +713,165 @@ class GoogleWorkbookGateway:
                 ReconciliationStatus.UNAVAILABLE.value,
             }
             for row in rows
+        )
+
+    def find_import_by_hash(self, statement_hash: str) -> ImportRecord | None:
+        """Find an authoritative staged or completed import by statement hash."""
+        import_rows = _data_rows(
+            "Imports",
+            self._client.read_rows(self.workbook_id, "Imports")[2:],
+        )
+        transaction_rows = _data_rows(
+            "Transactions",
+            self._client.read_rows(self.workbook_id, "Transactions")[2:],
+        )
+        for row in import_rows:
+            if str(row[2]) != statement_hash:
+                continue
+            import_id = str(row[0])
+            transaction_ids = tuple(
+                str(transaction[0])
+                for transaction in transaction_rows
+                if str(transaction[2]) == import_id
+            )
+            return ImportRecord(
+                import_id=import_id,
+                statement_hash=statement_hash,
+                status=ImportStatus(str(row[10])),
+                transaction_ids=transaction_ids,
+                imported_at=datetime.fromisoformat(str(row[11])) if row[11] else None,
+            )
+        return None
+
+    def find_transactions(
+        self,
+        fingerprints: tuple[str, ...],
+    ) -> tuple[NormalizedTransaction, ...]:
+        """Return authoritative rows with one of the requested fingerprints."""
+        requested = set(fingerprints)
+        rows = _data_rows(
+            "Transactions",
+            self._client.read_rows(self.workbook_id, "Transactions")[2:],
+        )
+        _validate_transaction_rows(rows)
+        return tuple(_transaction_from_row(row) for row in rows if str(row[1]) in requested)
+
+    def transactions_in_window(
+        self,
+        account_id: str,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[NormalizedTransaction, ...]:
+        """Return authoritative rows in an inclusive account/date window."""
+        rows = _data_rows(
+            "Transactions",
+            self._client.read_rows(self.workbook_id, "Transactions")[2:],
+        )
+        _validate_transaction_rows(rows)
+        transactions = tuple(_transaction_from_row(row) for row in rows)
+        return tuple(
+            transaction
+            for transaction in transactions
+            if transaction.account_id == account_id
+            and start_date <= (transaction.posting_date or transaction.transaction_date)
+            <= end_date
+        )
+
+    def commit_import(self, approved_import: ApprovedImport) -> ImportResult:
+        """Converge a staged import to one complete audit row and stable ledger rows."""
+        statement = approved_import.statement
+        if any(transaction.fingerprint is None for transaction in statement.transactions):
+            raise ValueError("approved transactions require fingerprints")
+
+        import_rows = _data_rows(
+            "Imports",
+            self._client.read_rows(self.workbook_id, "Imports")[2:],
+        )
+        matching_index = next(
+            (
+                index
+                for index, row in enumerate(import_rows)
+                if str(row[2]) == statement.source_hash
+            ),
+            None,
+        )
+        if matching_index is not None:
+            existing = import_rows[matching_index]
+            if str(existing[0]) != approved_import.import_id:
+                raise ValueError("pending import ID does not match deterministic retry ID")
+            if ImportStatus(str(existing[10])) is ImportStatus.COMPLETE:
+                transaction_ids = tuple(
+                    transaction.transaction_id for transaction in statement.transactions
+                )
+                return ImportResult(
+                    approved_import.import_id,
+                    ImportStatus.SKIPPED,
+                    transaction_ids,
+                    "statement already imported",
+                )
+            import_row_number = matching_index + 3
+        else:
+            import_row_number = len(import_rows) + 3
+
+        self._client.write_rows(
+            self.workbook_id,
+            "Imports",
+            import_row_number,
+            (_import_row(approved_import, ImportStatus.PENDING),),
+        )
+
+        transaction_rows = _data_rows(
+            "Transactions",
+            self._client.read_rows(self.workbook_id, "Transactions")[2:],
+        )
+        existing_transaction_ids = {str(row[0]) for row in transaction_rows}
+        existing_fingerprints = {str(row[1]) for row in transaction_rows}
+        missing_transactions = tuple(
+            transaction
+            for transaction in statement.transactions
+            if transaction.transaction_id not in existing_transaction_ids
+            and transaction.fingerprint not in existing_fingerprints
+        )
+        if missing_transactions:
+            self._client.write_rows(
+                self.workbook_id,
+                "Transactions",
+                len(transaction_rows) + 3,
+                tuple(_transaction_row(transaction) for transaction in missing_transactions),
+            )
+
+        rule_rows = _data_rows(
+            "Merchant Rules",
+            self._client.read_rows(self.workbook_id, "Merchant Rules")[2:],
+        )
+        existing_rule_ids = {str(row[0]) for row in rule_rows}
+        missing_rules = tuple(
+            rule
+            for rule in approved_import.merchant_rules
+            if rule.rule_id not in existing_rule_ids
+        )
+        if missing_rules:
+            self._client.write_rows(
+                self.workbook_id,
+                "Merchant Rules",
+                len(rule_rows) + 3,
+                tuple(_merchant_rule_row(rule) for rule in missing_rules),
+            )
+
+        self._client.write_rows(
+            self.workbook_id,
+            "Imports",
+            import_row_number,
+            (_import_row(approved_import, ImportStatus.COMPLETE),),
+        )
+        transaction_ids = tuple(
+            transaction.transaction_id for transaction in statement.transactions
+        )
+        return ImportResult(
+            approved_import.import_id,
+            ImportStatus.COMPLETE,
+            transaction_ids,
+            f"Imported {len(transaction_ids)} transactions.",
         )
 
     def _load_configuration(self) -> WorkbookConfig:

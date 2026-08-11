@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -147,6 +147,15 @@ class WorkbookGateway(WorkbookConnection, Protocol):
         self, fingerprints: tuple[str, ...]
     ) -> tuple[NormalizedTransaction, ...]:
         """Return existing transactions matching the supplied fingerprints."""
+        ...
+
+    def transactions_in_window(
+        self,
+        account_id: str,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[NormalizedTransaction, ...]:
+        """Return authoritative rows used for near-duplicate comparison."""
         ...
 
     def commit_import(self, approved_import: ApprovedImport) -> ImportResult:

@@ -2,9 +2,9 @@
 
 A privacy-conscious macOS CLI for importing AMEX, Bank of America, and Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
 
-The project is under active implementation. The current foundation includes the
-domain contracts, Google workbook lifecycle, PDF validation and discovery, and a
-deterministic AMEX parser.
+The project is under active implementation. The current vertical slice imports
+one reviewed AMEX statement into Google Sheets with duplicate protection,
+retry-safe writes, and an import audit record.
 
 ## Development setup
 
@@ -69,7 +69,7 @@ removes these local files and does not delete the Google workbook.
 ## Review an AMEX statement
 
 After connecting a workbook and populating its member/account configuration,
-review one text-bearing AMEX statement:
+import one text-bearing AMEX statement:
 
 ```bash
 family-spend import /path/to/statement.pdf
@@ -82,9 +82,21 @@ a text-labeled review table. Enter `help` at the `review>` prompt to see edit,
 filter, bulk-category, rule-save, reconciliation-override, approval, and cancel
 commands.
 
-Phase 3 does not write approved transactions or new merchant rules to Google
-Sheets. It explicitly reports that nothing was uploaded; Phase 4 adds the
-idempotent commit step.
+Approval writes the reviewed transactions and any selected merchant rules. The
+same statement is skipped on repeat, exact overlapping rows are omitted, and
+near-duplicates require an explicit review decision. This command intentionally
+accepts exactly one PDF; recursive folder processing belongs to the later
+backfill workflow.
+
+Temporary structured review data is deleted by default. To retain a private,
+owner-readable diagnostic record outside the repository, run:
+
+```bash
+family-spend import /path/to/statement.pdf --retain-cache
+```
+
+The completion message includes the retained cache ID. `family-spend status`
+shows the configured cache directory.
 
 ## Project documents
 
@@ -95,6 +107,7 @@ idempotent commit step.
 - [Phase 1 Google workbook architecture](docs/architecture/phase-1-google-workbook.md)
 - [Phase 2 PDF and AMEX parser architecture](docs/architecture/phase-2-amex-parser.md)
 - [Phase 3 review and rules architecture](docs/architecture/phase-3-review-and-rules.md)
+- [Phase 4 single-import architecture](docs/architecture/phase-4-single-import.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy

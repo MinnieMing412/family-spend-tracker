@@ -98,7 +98,13 @@ def main(
             print(application.disconnect(), file=stdout)
             return 0
         if arguments.command == "import" and application is not None:
-            print(application.import_statement(arguments.source), file=stdout)
+            print(
+                application.import_statement(
+                    arguments.source,
+                    retain_cache=arguments.retain_cache,
+                ),
+                file=stdout,
+            )
             return 0
         print(
             f"The '{arguments.command}' command is not implemented yet.",

@@ -534,6 +534,7 @@ class ApprovedImport:
     statement: NormalizedStatement
     reconciliation: ReconciliationResult
     reviewed_at: datetime
+    merchant_rules: tuple[MerchantRule, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

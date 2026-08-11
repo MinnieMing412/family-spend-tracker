@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -13,10 +14,119 @@ from family_spend.adapters.google_auth import (
     GoogleCredentialManager,
 )
 from family_spend.adapters.local import FileCredentialStore
-from family_spend.adapters.memory import InMemorySheetsClient
+from family_spend.adapters.memory import (
+    FixedClock,
+    InMemorySheetsClient,
+    InMemoryStructuredCache,
+)
+from family_spend.domain.models import ImportStatus
+from family_spend.imports import SingleImportWorkflow
+from family_spend.review import ReviewEngine
+from tests.import_helpers import ApprovingReviewer, build_ingestion, write_statement
+
+
+class FaultInjectingSheetsClient(InMemorySheetsClient):
+    """Raise once at a selected workbook write boundary."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._write_count = 0
+        self._failure_write: int | None = None
+        self._fail_after_write = False
+
+    def inject_failure(self, write_number: int, *, after_write: bool = False) -> None:
+        self._write_count = 0
+        self._failure_write = write_number
+        self._fail_after_write = after_write
+
+    def write_rows(
+        self,
+        workbook_id: str,
+        worksheet: str,
+        start_row: int,
+        rows: tuple[tuple[object, ...], ...],
+    ) -> None:
+        self._write_count += 1
+        should_fail = self._write_count == self._failure_write
+        if should_fail and not self._fail_after_write:
+            self._failure_write = None
+            raise RuntimeError("injected Google write failure")
+        super().write_rows(workbook_id, worksheet, start_row, rows)
+        if should_fail:
+            self._failure_write = None
+            raise RuntimeError("injected Google write failure")
 
 
 class GoogleWorkbookGatewayContractTests(unittest.TestCase):
+    def test_partial_import_retries_converge_without_duplicate_rows(self) -> None:
+        scenarios = (
+            (1, False),  # before the pending audit write
+            (2, True),  # ambiguous failure after transaction rows reached Sheets
+            (4, False),  # before the final audit status update
+        )
+        for write_number, after_write in scenarios:
+            with self.subTest(
+                write_number=write_number,
+                after_write=after_write,
+            ), TemporaryDirectory() as directory:
+                sheets = FaultInjectingSheetsClient()
+                gateway = GoogleWorkbookFactory(sheets).create("Family Spending")
+                gateway.provision_schema()
+                sheets.write_rows(
+                    gateway.workbook_id,
+                    "Members",
+                    3,
+                    (
+                        ("member-alpha", "Alpha", "MEMBER ALPHA", True),
+                        ("member-beta", "Beta", "MEMBER BETA", True),
+                    ),
+                )
+                sheets.write_rows(
+                    gateway.workbook_id,
+                    "Accounts",
+                    3,
+                    (
+                        (
+                            "amex-primary",
+                            "amex",
+                            "ending-10005",
+                            "member-alpha",
+                            "AMEX",
+                            True,
+                        ),
+                    ),
+                )
+                engine = ReviewEngine()
+                workflow = SingleImportWorkflow(
+                    ingestion=build_ingestion(),
+                    review_engine=engine,
+                    reviewer=ApprovingReviewer(engine, save_rule=True),
+                    workbook=gateway,
+                    configuration=gateway.load_configuration(),
+                    cache=InMemoryStructuredCache(),
+                    clock=FixedClock(datetime(2026, 8, 10, 12, 0, tzinfo=UTC)),
+                )
+                path = Path(directory) / "statement.pdf"
+                write_statement(path)
+                sheets.inject_failure(write_number, after_write=after_write)
+
+                with self.assertRaisesRegex(RuntimeError, "Google write failure"):
+                    workflow.execute(path)
+                result = workflow.execute(path)
+
+                transaction_rows = sheets.read_rows(
+                    gateway.workbook_id, "Transactions"
+                )[2:]
+                rule_rows = sheets.read_rows(gateway.workbook_id, "Merchant Rules")[2:]
+                import_rows = sheets.read_rows(gateway.workbook_id, "Imports")[2:]
+                self.assertEqual(ImportStatus.COMPLETE, result.status)
+                self.assertEqual(8, len(transaction_rows))
+                self.assertEqual(8, len({row[0] for row in transaction_rows}))
+                self.assertEqual(8, len({row[1] for row in transaction_rows}))
+                self.assertEqual(1, len(rule_rows))
+                self.assertEqual(1, len(import_rows))
+                self.assertEqual("complete", import_rows[0][10])
+
     def test_provisioning_is_retry_safe_and_loads_seeded_categories(self) -> None:
         sheets = InMemorySheetsClient()
         factory = GoogleWorkbookFactory(sheets)
