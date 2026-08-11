@@ -3,7 +3,8 @@
 A privacy-conscious macOS CLI for importing AMEX, Bank of America, and Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
 
 The project is under active implementation. The current vertical slice imports
-one reviewed AMEX statement into Google Sheets with duplicate protection,
+one reviewed AMEX or supported Bank of America credit-card statement into Google
+Sheets with duplicate protection,
 retry-safe writes, and an import audit record.
 
 ## Development setup
@@ -66,10 +67,10 @@ On macOS, the workbook reference and OAuth credentials are stored separately
 under `~/Library/Application Support/Family Spend Tracker/`. `disconnect`
 removes these local files and does not delete the Google workbook.
 
-## Review an AMEX statement
+## Review a supported statement
 
 After connecting a workbook and populating its member/account configuration,
-import one text-bearing AMEX statement:
+import one text-bearing AMEX or Bank of America credit-card statement:
 
 ```bash
 family-spend import /path/to/statement.pdf
@@ -87,6 +88,13 @@ same statement is skipped on repeat, exact overlapping rows are omitted, and
 near-duplicates require an explicit review decision. This command intentionally
 accepts exactly one PDF; recursive folder processing belongs to the later
 backfill workflow.
+
+Bank of America support covers the consumer credit-card layout documented in
+[the Phase 5A architecture note](docs/architecture/phase-5a-bank-of-america-parser.md),
+including account-summary totals, transaction and posting dates, continuation
+pages, payments/credits, purchases, balance transfers, cash advances, fees, and
+interest. A detected but unsupported BOA layout fails with an explicit diagnostic
+instead of guessing.
 
 Temporary structured review data is deleted by default. To retain a private,
 owner-readable diagnostic record outside the repository, run:
@@ -108,6 +116,7 @@ shows the configured cache directory.
 - [Phase 2 PDF and AMEX parser architecture](docs/architecture/phase-2-amex-parser.md)
 - [Phase 3 review and rules architecture](docs/architecture/phase-3-review-and-rules.md)
 - [Phase 4 single-import architecture](docs/architecture/phase-4-single-import.md)
+- [Phase 5A Bank of America parser architecture](docs/architecture/phase-5a-bank-of-america-parser.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy
