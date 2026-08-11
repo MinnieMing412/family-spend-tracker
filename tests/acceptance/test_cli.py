@@ -41,12 +41,12 @@ class CliAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(command, result.stdout)
 
-    def test_unimplemented_command_fails_without_claiming_success(self) -> None:
+    def test_unimplemented_import_fails_without_claiming_success(self) -> None:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(PROJECT_ROOT / "src")
 
         result = subprocess.run(
-            [sys.executable, "-m", "family_spend", "status"],
+            [sys.executable, "-m", "family_spend", "import", "sample.pdf"],
             cwd=PROJECT_ROOT,
             env=environment,
             capture_output=True,

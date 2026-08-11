@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Never, TextIO
 
 from family_spend.application import CliApplication
@@ -25,7 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    commands.add_parser("setup", help="Create or connect a Google Sheets workbook.")
+    setup_parser = commands.add_parser(
+        "setup", help="Create or connect a Google Sheets workbook."
+    )
+    setup_parser.add_argument("--client-secrets", required=True, type=Path)
+    setup_parser.add_argument("--workbook-name", default="Family Spend Tracker")
+    setup_parser.add_argument("--workbook-url")
 
     import_parser = commands.add_parser("import", help="Import a PDF or folder.")
     import_parser.add_argument("source")
@@ -62,8 +68,33 @@ def main(
         if arguments.command is None:
             parser.print_help(file=stdout)
             return 0
+        if application is None and arguments.command in {
+            "setup",
+            "status",
+            "validate-workbook",
+            "disconnect",
+        }:
+            from family_spend.bootstrap import build_application
+
+            application = build_application()
+        if arguments.command == "setup" and application is not None:
+            print(
+                application.setup(
+                    client_secrets=arguments.client_secrets,
+                    workbook_name=arguments.workbook_name,
+                    workbook_url=arguments.workbook_url,
+                ),
+                file=stdout,
+            )
+            return 0
         if arguments.command == "status" and application is not None:
             print(application.status(), file=stdout)
+            return 0
+        if arguments.command == "validate-workbook" and application is not None:
+            print(application.validate_workbook(), file=stdout)
+            return 0
+        if arguments.command == "disconnect" and application is not None:
+            print(application.disconnect(), file=stdout)
             return 0
         print(
             f"The '{arguments.command}' command is not implemented yet.",

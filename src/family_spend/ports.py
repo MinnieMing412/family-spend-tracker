@@ -59,8 +59,41 @@ class SettingsStore(Protocol):
         ...
 
 
-class WorkbookGateway(Protocol):
-    """Read and update the Google Sheets workbook through a stable interface."""
+class CredentialManager(Protocol):
+    """Authorize Google access and remove locally retained credentials."""
+
+    def authorize(self, client_secrets: Path) -> str:
+        """Stage browser authorization and return a non-secret local reference."""
+        ...
+
+    def commit_authorization(self) -> None:
+        """Accept staged credentials after setup succeeds."""
+        ...
+
+    def rollback_authorization(self) -> None:
+        """Restore previous credentials after setup fails."""
+        ...
+
+    def identity(self, credential_reference: str) -> str:
+        """Return the authenticated Google identity for status output."""
+        ...
+
+    def delete(self, credential_reference: str) -> None:
+        """Delete the credentials identified by the local reference."""
+        ...
+
+
+class WorkbookConnection(Protocol):
+    """Provision and read one compatible Google Sheets workbook."""
+
+    @property
+    def workbook_id(self) -> str:
+        """Return the identifier of the connected Google workbook."""
+        ...
+
+    def provision_schema(self) -> None:
+        """Create missing required sheets, headers, metadata, and categories."""
+        ...
 
     def validate_schema(self) -> None:
         """Raise an error when required sheets or columns are missing."""
@@ -69,6 +102,17 @@ class WorkbookGateway(Protocol):
     def load_configuration(self) -> WorkbookConfig:
         """Load members, accounts, categories, and merchant rules."""
         ...
+
+    def latest_successful_import(self) -> datetime | None:
+        """Return the newest successful import timestamp, if one exists."""
+        ...
+
+    def unresolved_exception_count(self) -> int:
+        """Return the number of unresolved import or reconciliation exceptions."""
+        ...
+
+class WorkbookGateway(WorkbookConnection, Protocol):
+    """Extend a workbook connection with Phase 4 transaction import operations."""
 
     def find_import_by_hash(self, statement_hash: str) -> ImportRecord | None:
         """Find a prior import of the same statement, if one exists."""
@@ -82,6 +126,18 @@ class WorkbookGateway(Protocol):
 
     def commit_import(self, approved_import: ApprovedImport) -> ImportResult:
         """Atomically store an approved statement and its transactions."""
+        ...
+
+
+class WorkbookFactory(Protocol):
+    """Create or connect workbook gateways after Google authorization."""
+
+    def create(self, title: str) -> WorkbookConnection:
+        """Create a new workbook and return its bound gateway."""
+        ...
+
+    def connect(self, workbook_id: str) -> WorkbookConnection:
+        """Return a gateway bound to an existing workbook."""
         ...
 
 

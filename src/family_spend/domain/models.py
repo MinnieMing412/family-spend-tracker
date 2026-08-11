@@ -6,7 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 
-def _validate_masked_account_identifier(value: str) -> None:
+def validate_masked_account_identifier(value: str) -> None:
     """Reject account identifiers that expose too many digits or lack masking."""
     if not isinstance(value, str):
         raise TypeError("masked account identifier must be a string")
@@ -16,6 +16,14 @@ def _validate_masked_account_identifier(value: str) -> None:
     )
     if not marker_present or not 4 <= digit_count <= 8:
         raise ValueError("account identifier must contain only a masked account identifier")
+
+
+def _validate_unique_ids(values: tuple[str, ...], *, record_name: str) -> None:
+    """Reject blank or duplicate stable IDs in workbook configuration."""
+    if any(not value.strip() for value in values):
+        raise ValueError(f"{record_name} IDs must not be empty")
+    if len(set(values)) != len(values):
+        raise ValueError(f"{record_name} IDs must be unique")
 
 
 class Institution(StrEnum):
@@ -168,7 +176,7 @@ class NormalizedTransaction:
             raise TypeError("posting_date must be a date or None")
         if not isinstance(self.amount, Money):
             raise TypeError("amount must be Money")
-        _validate_masked_account_identifier(self.account_id)
+        validate_masked_account_identifier(self.account_id)
         if self.transaction_type in _NEGATIVE_TRANSACTION_TYPES and self.amount.amount >= 0:
             raise ValueError(f"{self.transaction_type.value} amount must be negative")
         if self.transaction_type in _POSITIVE_TRANSACTION_TYPES and self.amount.amount <= 0:
@@ -219,7 +227,7 @@ class NormalizedStatement:
         """Validate institution, account masking, and the statement date range."""
         if not isinstance(self.institution, Institution):
             raise TypeError("institution must be an Institution")
-        _validate_masked_account_identifier(self.account_id)
+        validate_masked_account_identifier(self.account_id)
         if type(self.start_date) is not date:
             raise TypeError("start_date must be a date")
         if type(self.end_date) is not date:
@@ -308,7 +316,7 @@ class AccountConfig:
         """Validate the institution and ensure the displayed account is masked."""
         if not isinstance(self.institution, Institution):
             raise TypeError("institution must be an Institution")
-        _validate_masked_account_identifier(self.masked_identifier)
+        validate_masked_account_identifier(self.masked_identifier)
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,8 +358,22 @@ class WorkbookConfig:
     merchant_rules: tuple[MerchantRule, ...]
 
     def __post_init__(self) -> None:
-        """Reject merchant rules that reference categories that do not exist."""
-        category_ids = {category.category_id for category in self.categories}
+        """Validate stable IDs and references across authoritative configuration."""
+        member_ids = tuple(member.member_id for member in self.members)
+        account_ids = tuple(account.account_id for account in self.accounts)
+        category_values = tuple(category.category_id for category in self.categories)
+        rule_ids = tuple(rule.rule_id for rule in self.merchant_rules)
+        _validate_unique_ids(member_ids, record_name="member")
+        _validate_unique_ids(account_ids, record_name="account")
+        _validate_unique_ids(category_values, record_name="category")
+        _validate_unique_ids(rule_ids, record_name="merchant rule")
+        member_id_set = set(member_ids)
+        for account in self.accounts:
+            if account.default_member_id not in member_id_set:
+                raise ValueError(
+                    f"account references unknown member: {account.default_member_id}"
+                )
+        category_ids = set(category_values)
         for rule in self.merchant_rules:
             if rule.category_id not in category_ids:
                 raise ValueError(f"merchant rule references unknown category: {rule.category_id}")

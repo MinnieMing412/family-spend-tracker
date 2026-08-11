@@ -9,7 +9,11 @@ description = "Review-first family statement importer for Google Sheets"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Family Spend Tracker contributors" }]
-dependencies = []
+dependencies = [
+  "google-api-python-client>=2.0,<3",
+  "google-auth>=2.0,<3",
+  "google-auth-oauthlib>=1.2,<2",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -27,6 +31,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+  "integration: opt-in test against a disposable external resource",
+]
 
 [tool.ruff]
 line-length = 100
@@ -39,3 +46,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.12"
 strict = true
 packages = ["family_spend"]
+
+[[tool.mypy.overrides]]
+module = [
+  "google.*",
+  "google_auth_oauthlib.*",
+  "googleapiclient.*",
+]
+ignore_missing_imports = true
