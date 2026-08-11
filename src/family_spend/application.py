@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from urllib.parse import urlparse
 
 from family_spend.domain.models import LocalSettings, ReviewStatus
-from family_spend.ingestion import StatementIngestionService
+from family_spend.imports import SingleImportWorkflow
+from family_spend.ingestion import StatementIngestionService, discover_pdfs
 from family_spend.ports import (
+    Clock,
     CredentialManager,
     ReviewPort,
     SettingsStore,
+    StructuredCache,
     WorkbookConnection,
     WorkbookFactory,
+    WorkbookGateway,
 )
 from family_spend.review import ReviewEngine
 
@@ -56,8 +60,8 @@ class CliApplication(Protocol):
         """Parse statement PDFs and summarize them without uploading data."""
         ...
 
-    def import_statement(self, source: Path) -> str:
-        """Parse and review a statement without committing it to the workbook."""
+    def import_statement(self, source: Path, *, retain_cache: bool = False) -> str:
+        """Parse, review, and import exactly one statement PDF."""
         ...
 
 
@@ -75,6 +79,8 @@ class FamilySpendApplication:
         ingestion: StatementIngestionService | None = None,
         review_engine: ReviewEngine | None = None,
         reviewer: ReviewPort | None = None,
+        structured_cache: StructuredCache | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create the application with its local settings and workbook providers."""
         self._settings = settings
@@ -85,6 +91,8 @@ class FamilySpendApplication:
         self._ingestion = ingestion
         self._review_engine = review_engine
         self._reviewer = reviewer
+        self._structured_cache = structured_cache
+        self._clock = clock
 
     def setup(
         self,
@@ -183,15 +191,15 @@ class FamilySpendApplication:
             raise ValueError("statement ingestion is not configured")
         return self._ingestion.parse_summary(source)
 
-    def import_statement(self, source: Path) -> str:
-        """Parse and review one statement while Phase 4 workbook writes remain absent."""
+    def import_statement(self, source: Path, *, retain_cache: bool = False) -> str:
+        """Parse, review, and idempotently import one statement when configured."""
         if self._review_engine is None or self._reviewer is None:
             return self.parse_summary(source)
         if self._ingestion is None:
             raise ValueError("statement ingestion is not configured")
-        results = self._ingestion.parse(source)
-        if len(results) != 1:
-            raise ValueError("interactive review accepts exactly one statement PDF")
+        paths = discover_pdfs(source)
+        if len(paths) != 1:
+            raise ValueError("single import accepts exactly one statement PDF")
         settings = self._settings.load()
         if settings is None:
             raise ValueError("no workbook is connected")
@@ -201,6 +209,26 @@ class FamilySpendApplication:
             workbook = self._workbook
         else:
             raise ValueError("workbook dependency is not configured")
+        if self._structured_cache is not None and self._clock is not None:
+            outcome = SingleImportWorkflow(
+                ingestion=self._ingestion,
+                review_engine=self._review_engine,
+                reviewer=self._reviewer,
+                workbook=cast(WorkbookGateway, workbook),
+                configuration=workbook.load_configuration(),
+                cache=self._structured_cache,
+                clock=self._clock,
+            ).execute(paths[0], retain_cache=retain_cache)
+            cache_text = (
+                f" Retained cache: {outcome.cache_id}." if outcome.cache_id else ""
+            )
+            duplicate_text = (
+                f" Exact duplicates skipped: {outcome.exact_duplicate_count}."
+                if outcome.exact_duplicate_count
+                else ""
+            )
+            return f"{outcome.message}{duplicate_text}{cache_text}"
+        results = self._ingestion.parse(paths[0])
         initial = self._review_engine.prepare(
             results[0].statement,
             workbook.load_configuration(),

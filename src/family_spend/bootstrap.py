@@ -7,6 +7,8 @@ from family_spend.adapters.google_auth import GoogleCredentialManager
 from family_spend.adapters.local import (
     FileCredentialStore,
     FileSettingsStore,
+    FileStructuredCache,
+    SystemClock,
     default_application_directory,
 )
 from family_spend.adapters.terminal import TerminalReviewPort
@@ -58,4 +60,6 @@ def build_application() -> FamilySpendApplication:
         ingestion=ingestion,
         review_engine=review_engine,
         reviewer=TerminalReviewPort(engine=review_engine),
+        structured_cache=FileStructuredCache(application_directory / "cache"),
+        clock=SystemClock(),
     )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from family_spend.domain.models import (
@@ -131,6 +131,7 @@ class InMemoryWorkbookGateway:
         self._transactions_by_fingerprint: dict[str, NormalizedTransaction] = {}
         self._schema_version: str | None = SCHEMA_VERSION
         self._worksheets = tuple(schema.name for schema in WORKSHEET_SCHEMAS)
+        self._commit_failure_stage: str | None = None
 
     @property
     def workbook_id(self) -> str:
@@ -200,6 +201,32 @@ class InMemoryWorkbookGateway:
             if (transaction := self._transactions_by_fingerprint.get(fingerprint)) is not None
         )
 
+    def transactions_in_window(
+        self,
+        account_id: str,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[NormalizedTransaction, ...]:
+        """Return authoritative transactions in an inclusive date window."""
+        return tuple(
+            transaction
+            for transaction in self._transactions_by_fingerprint.values()
+            if transaction.account_id == account_id
+            and start_date <= (transaction.posting_date or transaction.transaction_date)
+            <= end_date
+        )
+
+    def fail_next_commit_at(self, stage: str) -> None:
+        """Inject one deterministic commit failure for retry contract tests."""
+        if stage not in {"before_write", "after_transactions", "before_finalize"}:
+            raise ValueError("unsupported commit failure stage")
+        self._commit_failure_stage = stage
+
+    def _fail_if_requested(self, stage: str) -> None:
+        if self._commit_failure_stage == stage:
+            self._commit_failure_stage = None
+            raise RuntimeError(f"injected commit failure: {stage}")
+
     def commit_import(self, approved_import: ApprovedImport) -> ImportResult:
         """Store an approved import once and skip duplicate statements.
 
@@ -208,22 +235,51 @@ class InMemoryWorkbookGateway:
         """
         statement = approved_import.statement
         existing = self.find_import_by_hash(statement.source_hash)
-        if existing is not None:
+        if existing is not None and existing.status is ImportStatus.COMPLETE:
             return ImportResult(
                 import_id=existing.import_id,
                 status=ImportStatus.SKIPPED,
                 transaction_ids=existing.transaction_ids,
                 message="statement already imported",
             )
+        if existing is not None and existing.import_id != approved_import.import_id:
+            raise ValueError("pending import ID does not match deterministic retry ID")
+
+        self._fail_if_requested("before_write")
+
+        transaction_ids = tuple(
+            transaction.transaction_id for transaction in statement.transactions
+        )
+        self._imports_by_hash[statement.source_hash] = ImportRecord(
+            import_id=approved_import.import_id,
+            statement_hash=statement.source_hash,
+            status=ImportStatus.PENDING,
+            transaction_ids=transaction_ids,
+            imported_at=approved_import.reviewed_at,
+        )
 
         for transaction in statement.transactions:
             if transaction.fingerprint is None:
                 raise ValueError("approved transactions require a fingerprint")
             self._transactions_by_fingerprint.setdefault(transaction.fingerprint, transaction)
 
-        transaction_ids = tuple(
-            transaction.transaction_id for transaction in statement.transactions
+        existing_rule_ids = {rule.rule_id for rule in self._configuration.merchant_rules}
+        self._configuration = WorkbookConfig(
+            self._configuration.members,
+            self._configuration.accounts,
+            self._configuration.categories,
+            (
+                *self._configuration.merchant_rules,
+                *(
+                    rule
+                    for rule in approved_import.merchant_rules
+                    if rule.rule_id not in existing_rule_ids
+                ),
+            ),
         )
+        self._fail_if_requested("after_transactions")
+        self._fail_if_requested("before_finalize")
+
         record = ImportRecord(
             import_id=approved_import.import_id,
             statement_hash=statement.source_hash,

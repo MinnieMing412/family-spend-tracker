@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from family_spend.domain.models import LocalSettings
+from family_spend.domain.models import LocalSettings, StructuredCacheRecord
 
 _SETTINGS_SCHEMA_VERSION = 1
+_CACHE_SCHEMA_VERSION = 1
+_CACHE_ID = re.compile(r"^[a-z0-9-]+$")
 
 
 def default_application_directory() -> Path:
@@ -29,6 +33,7 @@ def default_application_directory() -> Path:
 def _write_private_json(path: Path, value: dict[str, Any]) -> None:
     """Atomically write JSON readable and writable only by the current user."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
     with NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -115,3 +120,56 @@ class FileCredentialStore:
         if credential_reference != str(self._path):
             raise ValueError("credential reference does not match the configured store")
         self._path.unlink(missing_ok=True)
+
+
+class FileStructuredCache:
+    """Persist privacy-limited structured import diagnostics in private files."""
+
+    def __init__(self, directory: Path) -> None:
+        self._directory = directory
+
+    def path_for(self, cache_id: str) -> Path:
+        """Return a traversal-safe cache path for diagnostics and tests."""
+        if _CACHE_ID.fullmatch(cache_id) is None:
+            raise ValueError("cache ID contains unsupported characters")
+        return self._directory / f"{cache_id}.json"
+
+    def load(self, cache_id: str) -> StructuredCacheRecord | None:
+        """Load one cache record, returning None when it was cleaned up."""
+        path = self.path_for(cache_id)
+        if not path.exists():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if raw.get("schema_version") != _CACHE_SCHEMA_VERSION:
+            raise ValueError("structured cache schema version is incompatible")
+        fields = raw.get("fields")
+        if not isinstance(fields, dict):
+            raise ValueError("structured cache fields are invalid")
+        return StructuredCacheRecord(
+            cache_id=str(raw["cache_id"]),
+            statement_hash=str(raw["statement_hash"]),
+            fields=tuple((str(key), str(value)) for key, value in sorted(fields.items())),
+        )
+
+    def save(self, record: StructuredCacheRecord) -> None:
+        """Atomically save a structured record with owner-only permissions."""
+        _write_private_json(
+            self.path_for(record.cache_id),
+            {
+                "schema_version": _CACHE_SCHEMA_VERSION,
+                "cache_id": record.cache_id,
+                "statement_hash": record.statement_hash,
+                "fields": dict(record.fields),
+            },
+        )
+
+    def delete(self, cache_id: str) -> None:
+        """Delete one retained record if present."""
+        self.path_for(cache_id).unlink(missing_ok=True)
+
+
+class SystemClock:
+    """Supply timezone-aware current UTC timestamps in production."""
+
+    def now(self) -> datetime:
+        return datetime.now(UTC)
