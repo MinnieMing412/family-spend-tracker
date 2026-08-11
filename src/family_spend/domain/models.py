@@ -104,6 +104,24 @@ class ReviewStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class DuplicateState(StrEnum):
+    """Duplicate assessment attached to a transaction during review."""
+
+    NONE = "none"
+    EXACT = "exact"
+    NEAR = "near"
+
+
+class CategorizationSource(StrEnum):
+    """How the current transaction category was selected."""
+
+    EXACT_RULE = "exact_rule"
+    CONTAINS_RULE = "contains_rule"
+    MANUAL = "manual"
+    UNCATEGORIZED = "uncategorized"
+    NOT_APPLICABLE = "not_applicable"
+
+
 class ImportStatus(StrEnum):
     """Lifecycle states for a workbook import."""
 
@@ -305,6 +323,47 @@ class ReconciliationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewRow:
+    """Original and currently corrected values for one reviewable transaction."""
+
+    original: NormalizedTransaction
+    current: NormalizedTransaction
+    warnings: tuple[DomainWarning, ...] = ()
+    duplicate_state: DuplicateState = DuplicateState.NONE
+    categorization_source: CategorizationSource = CategorizationSource.UNCATEGORIZED
+
+    def __post_init__(self) -> None:
+        """Keep row identity stable and validate review classifications."""
+        if self.original.transaction_id != self.current.transaction_id:
+            raise ValueError("review corrections must preserve transaction identity")
+        if not isinstance(self.duplicate_state, DuplicateState):
+            raise TypeError("duplicate state must be a DuplicateState")
+        if not isinstance(self.categorization_source, CategorizationSource):
+            raise TypeError("categorization source must be a CategorizationSource")
+
+    @property
+    def is_exception(self) -> bool:
+        """Return whether this row still needs focused review."""
+        uncategorized = (
+            self.current.included_in_spend
+            and (
+                not self.current.category_id
+                or self.current.category_id.casefold() == "uncategorized"
+            )
+        )
+        blocking_warning = any(
+            warning.severity in {WarningSeverity.WARNING, WarningSeverity.ERROR}
+            for warning in self.warnings
+        )
+        return (
+            not self.current.member_id
+            or uncategorized
+            or self.duplicate_state is DuplicateState.NEAR
+            or blocking_warning
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewState:
     """A statement's reconciliation and current user-review decision."""
 
@@ -312,11 +371,47 @@ class ReviewState:
     status: ReviewStatus
     reconciliation: ReconciliationResult
     saved_rule_ids: tuple[str, ...] = ()
+    rows: tuple[ReviewRow, ...] = ()
+    saved_rules: tuple[MerchantRule, ...] = ()
+    valid_member_ids: tuple[str, ...] = ()
+    valid_category_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate that the review uses a supported status."""
         if not isinstance(self.status, ReviewStatus):
             raise TypeError("status must be a ReviewStatus")
+        if self.status is ReviewStatus.APPROVED and not self.is_clean:
+            raise ValueError("an approved review must be clean")
+
+    @property
+    def is_clean(self) -> bool:
+        """Compute whether approval is safe from domain state, never adapter claims."""
+        reconciled = self.reconciliation.status in {
+            ReconciliationStatus.MATCHED,
+            ReconciliationStatus.OVERRIDDEN,
+        }
+        statement_warning = any(
+            warning.severity in {WarningSeverity.WARNING, WarningSeverity.ERROR}
+            for warning in self.statement.warnings
+        )
+        invalid_reference = any(
+            (
+                bool(self.valid_member_ids)
+                and row.current.member_id not in self.valid_member_ids
+            )
+            or (
+                row.current.included_in_spend
+                and bool(self.valid_category_ids)
+                and row.current.category_id not in self.valid_category_ids
+            )
+            for row in self.rows
+        )
+        return (
+            reconciled
+            and not statement_warning
+            and not invalid_reference
+            and not any(row.is_exception for row in self.rows)
+        )
 
 
 @dataclass(frozen=True, slots=True)

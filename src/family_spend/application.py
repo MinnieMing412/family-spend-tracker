@@ -4,14 +4,16 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlparse
 
-from family_spend.domain.models import LocalSettings
+from family_spend.domain.models import LocalSettings, ReviewStatus
 from family_spend.ingestion import StatementIngestionService
 from family_spend.ports import (
     CredentialManager,
+    ReviewPort,
     SettingsStore,
     WorkbookConnection,
     WorkbookFactory,
 )
+from family_spend.review import ReviewEngine
 
 
 def _workbook_id_from_url(workbook_url: str) -> str:
@@ -54,6 +56,10 @@ class CliApplication(Protocol):
         """Parse statement PDFs and summarize them without uploading data."""
         ...
 
+    def import_statement(self, source: Path) -> str:
+        """Parse and review a statement without committing it to the workbook."""
+        ...
+
 
 class FamilySpendApplication:
     """Coordinate CLI requests using settings and workbook storage boundaries."""
@@ -67,6 +73,8 @@ class FamilySpendApplication:
         workbooks: WorkbookFactory | None = None,
         cache_location: Path | None = None,
         ingestion: StatementIngestionService | None = None,
+        review_engine: ReviewEngine | None = None,
+        reviewer: ReviewPort | None = None,
     ) -> None:
         """Create the application with its local settings and workbook providers."""
         self._settings = settings
@@ -75,6 +83,8 @@ class FamilySpendApplication:
         self._workbooks = workbooks
         self._cache_location = cache_location
         self._ingestion = ingestion
+        self._review_engine = review_engine
+        self._reviewer = reviewer
 
     def setup(
         self,
@@ -172,3 +182,38 @@ class FamilySpendApplication:
         if self._ingestion is None:
             raise ValueError("statement ingestion is not configured")
         return self._ingestion.parse_summary(source)
+
+    def import_statement(self, source: Path) -> str:
+        """Parse and review one statement while Phase 4 workbook writes remain absent."""
+        if self._review_engine is None or self._reviewer is None:
+            return self.parse_summary(source)
+        if self._ingestion is None:
+            raise ValueError("statement ingestion is not configured")
+        results = self._ingestion.parse(source)
+        if len(results) != 1:
+            raise ValueError("interactive review accepts exactly one statement PDF")
+        settings = self._settings.load()
+        if settings is None:
+            raise ValueError("no workbook is connected")
+        if self._workbooks is not None:
+            workbook = self._workbooks.connect(settings.workbook_id)
+        elif self._workbook is not None:
+            workbook = self._workbook
+        else:
+            raise ValueError("workbook dependency is not configured")
+        initial = self._review_engine.prepare(
+            results[0].statement,
+            workbook.load_configuration(),
+        )
+        decision = self._reviewer.review(initial)
+        if decision.statement.statement_id != initial.statement.statement_id:
+            raise ValueError("review decision does not belong to the parsed statement")
+        if decision.status is ReviewStatus.PENDING:
+            raise ValueError("review must explicitly approve or cancel")
+        if decision.status is ReviewStatus.CANCELLED:
+            return "Review cancelled. No transactions were uploaded."
+        return (
+            f"Review approved for {len(decision.rows)} transactions; "
+            f"{len(decision.saved_rules)} merchant rules selected. "
+            "No transactions were uploaded."
+        )
