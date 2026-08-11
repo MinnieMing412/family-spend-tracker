@@ -66,19 +66,25 @@ On macOS, the workbook reference and OAuth credentials are stored separately
 under `~/Library/Application Support/Family Spend Tracker/`. `disconnect`
 removes these local files and does not delete the Google workbook.
 
-## Parse AMEX statements
+## Review an AMEX statement
 
-Inspect one text-bearing AMEX statement without uploading any data:
+After connecting a workbook and populating its member/account configuration,
+review one text-bearing AMEX statement:
 
 ```bash
 family-spend import /path/to/statement.pdf
 ```
 
-The same command accepts a directory and discovers PDFs recursively in stable
-relative-path order. It rejects encrypted, corrupt, scanned/image-only,
-unsupported, and ambiguous documents before parsing. The current Phase 2
-command prints only a parse summary; transaction review and workbook writes are
-added in later phases.
+The command rejects encrypted, corrupt, scanned/image-only, unsupported, and
+ambiguous documents before parsing. It then resolves ownership, normalizes
+merchants, applies workbook rules, reconciles statement sections, and displays
+a text-labeled review table. Enter `help` at the `review>` prompt to see edit,
+filter, bulk-category, rule-save, reconciliation-override, approval, and cancel
+commands.
+
+Phase 3 does not write approved transactions or new merchant rules to Google
+Sheets. It explicitly reports that nothing was uploaded; Phase 4 adds the
+idempotent commit step.
 
 ## Project documents
 
@@ -88,6 +94,7 @@ added in later phases.
 - [Phase 0 contracts](docs/architecture/phase-0-contracts.md)
 - [Phase 1 Google workbook architecture](docs/architecture/phase-1-google-workbook.md)
 - [Phase 2 PDF and AMEX parser architecture](docs/architecture/phase-2-amex-parser.md)
+- [Phase 3 review and rules architecture](docs/architecture/phase-3-review-and-rules.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy

@@ -13,6 +13,7 @@ from family_spend.adapters.memory import (
     StaticParserRegistry,
     StaticStatementParser,
 )
+from family_spend.adapters.terminal import TerminalReviewPort
 
 __all__ = [
     "FixedClock",
@@ -26,4 +27,5 @@ __all__ = [
     "SequentialIdGenerator",
     "StaticParserRegistry",
     "StaticStatementParser",
+    "TerminalReviewPort",
 ]

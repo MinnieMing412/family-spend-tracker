@@ -9,6 +9,7 @@ from family_spend.adapters.local import (
     FileSettingsStore,
     default_application_directory,
 )
+from family_spend.adapters.terminal import TerminalReviewPort
 from family_spend.application import FamilySpendApplication
 from family_spend.domain.models import Institution
 from family_spend.ingestion import (
@@ -18,6 +19,7 @@ from family_spend.ingestion import (
     StatementIngestionService,
 )
 from family_spend.parsers import AmexStatementParser
+from family_spend.review import ReviewEngine
 
 
 def build_application() -> FamilySpendApplication:
@@ -47,10 +49,13 @@ def build_application() -> FamilySpendApplication:
             )
         ),
     )
+    review_engine = ReviewEngine()
     return FamilySpendApplication(
         settings=settings,
         credentials=credentials,
         workbooks=workbooks,
         cache_location=application_directory / "cache",
         ingestion=ingestion,
+        review_engine=review_engine,
+        reviewer=TerminalReviewPort(engine=review_engine),
     )
