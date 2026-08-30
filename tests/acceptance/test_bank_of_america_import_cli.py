@@ -40,6 +40,12 @@ FIXTURE = (
     / "bank_of_america"
     / "synthetic_credit_card_statement.txt"
 )
+DEPOSIT_FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "bank_of_america"
+    / "synthetic_deposit_statement.txt"
+)
 
 
 def build_ingestion() -> StatementIngestionService:
@@ -78,6 +84,27 @@ def workbook_configuration() -> WorkbookConfig:
                 "ending-4321",
                 "member-alpha",
                 "BOA",
+                True,
+            ),
+        ),
+        categories=(
+            CategoryConfig("uncategorized", "Uncategorized", 1, True),
+            CategoryConfig("other", "Other", 2, True),
+        ),
+        merchant_rules=(),
+    )
+
+
+def deposit_workbook_configuration() -> WorkbookConfig:
+    return WorkbookConfig(
+        members=(MemberConfig("member-alpha", "Alpha", (), True),),
+        accounts=(
+            AccountConfig(
+                "boa-deposit",
+                Institution.BANK_OF_AMERICA,
+                "ending-6789",
+                "member-alpha",
+                "BOA Deposit",
                 True,
             ),
         ),
@@ -166,6 +193,29 @@ class BankOfAmericaImportCliAcceptanceTests(unittest.TestCase):
         self.assertIn("Detected BANK OF AMERICA statement", result[1])
         self.assertIn("7 transactions", result[1])
         self.assertIn("No transactions were uploaded", result[1])
+
+    def test_boa_deposit_statement_uses_the_shared_idempotent_import(self) -> None:
+        engine = ReviewEngine()
+        reviewer = ApprovingReviewer(engine)
+        workbook = InMemoryWorkbookGateway(deposit_workbook_configuration())
+        cache = InMemoryStructuredCache()
+        application = self._application(workbook, engine, reviewer, cache)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "deposit.pdf"
+            write_text_pdf(path, tuple(DEPOSIT_FIXTURE.read_text().split("\f")))
+
+            first = self._run(application, path)
+            repeated = self._run(application, path)
+
+        transactions = workbook.transactions_in_window("ending-6789", date.min, date.max)
+        self.assertEqual((0, ""), (first[0], first[2]))
+        self.assertIn("import complete", first[1])
+        self.assertEqual((0, ""), (repeated[0], repeated[2]))
+        self.assertIn("already imported", repeated[1])
+        self.assertEqual(1, reviewer.call_count)
+        self.assertEqual(6, len(transactions))
+        self.assertEqual(2, sum(item.included_in_spend for item in transactions))
+        self.assertTrue(all(item.source_metadata == () for item in transactions))
 
     def test_boa_cancel_uses_the_shared_no_write_guarantee(self) -> None:
         engine = ReviewEngine()

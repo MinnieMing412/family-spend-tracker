@@ -3,7 +3,7 @@
 A privacy-conscious macOS CLI for importing AMEX, Bank of America, and Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
 
 The project is under active implementation. The current vertical slice imports
-one reviewed AMEX or supported Bank of America credit-card statement into Google
+one reviewed AMEX or supported Bank of America statement into Google
 Sheets with duplicate protection,
 retry-safe writes, and an import audit record.
 
@@ -70,7 +70,7 @@ removes these local files and does not delete the Google workbook.
 ## Review a supported statement
 
 After connecting a workbook and populating its member/account configuration,
-import one text-bearing AMEX or Bank of America credit-card statement:
+import one text-bearing AMEX or Bank of America statement:
 
 ```bash
 family-spend import /path/to/statement.pdf
@@ -89,12 +89,11 @@ near-duplicates require an explicit review decision. This command intentionally
 accepts exactly one PDF; recursive folder processing belongs to the later
 backfill workflow.
 
-Bank of America support covers the consumer credit-card layout documented in
+Bank of America support covers consumer credit-card and deposit-account layouts documented in
 [the Phase 5A architecture note](docs/architecture/phase-5a-bank-of-america-parser.md),
-including account-summary totals, transaction and posting dates, continuation
-pages, payments/credits, purchases, balance transfers, cash advances, fees, and
-interest. A detected but unsupported BOA layout fails with an explicit diagnostic
-instead of guessing.
+including account-summary totals, continuation pages, payments/credits,
+purchases, transfers, deposits, cash advances, fees, and interest. A detected but
+unsupported BOA layout fails with an explicit diagnostic instead of guessing.
 
 Temporary structured review data is deleted by default. To retain a private,
 owner-readable diagnostic record outside the repository, run:

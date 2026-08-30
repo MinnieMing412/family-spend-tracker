@@ -1,0 +1,28 @@
+BANK OF AMERICA
+Synthetic Advantage Banking
+for December 9, 2025 to January 7, 2026
+Account number: 1111 2222 6789
+Account summary
+Beginning balance on December 9, 2025 $1,000.00
+Deposits and other additions 2,250.00
+Withdrawals and other subtractions -425.50
+Checks -0.00
+Service fees -0.00
+Ending balance on January 7, 2026 $2,824.50
+
+IMPORTANT INFORMATION: BANK DEPOSIT ACCOUNTS
+
+Deposits and other additions
+Date Description Amount
+12/17/25 ZELLE PAYMENT FROM SYNTHETIC PERSON CONF# SAFE1234 250.00
+12/19/25 SYNTHETIC EMPLOYER DES:PAYROLL ID:SAFE01 INDN:TEST PERSON COID:SAFE02 PPD 2,000.00
+Total deposits and other additions $2,250.00
+Withdrawals and other subtractions
+Date Description Amount
+12/20/25 SYNTHETIC CREDIT CRD DES:AUTOPAY ID:SAFE03 INDN:TEST PERSON COID:SAFE04 PPD -300.00
+12/21/25 CHECKCARD 1221 SYNTHETIC VIDEO SERVICE CA -15.50
+12/22/25 EXAMPLE BANK DES:EXT TRNSFR ID:SAFE05 INDN:TEST PERSON CO ID:SAFE06 WEB -100.00
+12/23/25 PURCHASE 1223 SYNTHETIC MUSIC NEW YORK NY -10.00
+Total withdrawals and other subtractions -$425.50
+
+This page intentionally left blank

@@ -20,6 +20,9 @@ from family_spend.domain.models import (
     WarningSeverity,
 )
 from family_spend.errors import FamilySpendError
+from family_spend.parsers.bank_of_america_deposit import (
+    BankOfAmericaDepositStatementParser,
+)
 from family_spend.ports import ValidatedPdf
 
 _DATE_TOKEN = r"\d{1,2}/\d{1,2}(?:/\d{2,4})?"
@@ -84,7 +87,7 @@ class _PendingTransaction:
         return f"page-{self.page_number}:line-{self.line_number}"
 
 
-class BankOfAmericaStatementParser:
+class BankOfAmericaCreditCardStatementParser:
     """Parse the supported BOA consumer credit-card statement layout."""
 
     def parse(self, source: ValidatedPdf) -> ParseResult:
@@ -429,3 +432,17 @@ class BankOfAmericaStatementParser:
             severity=WarningSeverity.WARNING,
             evidence_ref=pending.evidence_ref,
         )
+
+
+class BankOfAmericaStatementParser:
+    """Dispatch supported BOA deposit and credit-card layouts by content."""
+
+    def __init__(self) -> None:
+        self._credit_card = BankOfAmericaCreditCardStatementParser()
+        self._deposit = BankOfAmericaDepositStatementParser()
+
+    def parse(self, source: ValidatedPdf) -> ParseResult:
+        text = "\n".join(source.page_texts)
+        if self._deposit.matches(text):
+            return self._deposit.parse(source)
+        return self._credit_card.parse(source)

@@ -31,6 +31,12 @@ def fixture_pages() -> tuple[str, ...]:
     )
 
 
+def deposit_fixture_pages() -> tuple[str, ...]:
+    return tuple(
+        (FIXTURE_ROOT / "synthetic_deposit_statement.txt").read_text().split("\f")
+    )
+
+
 def boa_registry() -> MarkerParserRegistry:
     return MarkerParserRegistry(
         (
@@ -88,6 +94,91 @@ class BankOfAmericaDetectionTests(unittest.TestCase):
 
 
 class BankOfAmericaParserContractTests(unittest.TestCase):
+    def test_synthetic_deposit_statement_matches_common_contract(self) -> None:
+        source = ValidatedPdfDocument(
+            Path("deposit.pdf"),
+            "deposit.pdf",
+            "1" * 64,
+            4,
+            deposit_fixture_pages(),
+        )
+        expected = json.loads(
+            (FIXTURE_ROOT / "synthetic_deposit_statement.expected.json").read_text()
+        )
+
+        statement = BankOfAmericaStatementParser().parse(source).statement
+
+        self.assertEqual(expected["account_id"], statement.account_id)
+        self.assertEqual(expected["start_date"], statement.start_date.isoformat())
+        self.assertEqual(expected["end_date"], statement.end_date.isoformat())
+        self.assertEqual(expected["closing_date"], statement.closing_date.isoformat())
+        self.assertEqual(expected["transaction_count"], len(statement.transactions))
+        self.assertEqual(
+            expected["transactions"],
+            [
+                [
+                    item.transaction_date.isoformat(),
+                    item.transaction_type.value,
+                    str(item.amount.amount),
+                    item.included_in_spend,
+                ]
+                for item in statement.transactions
+            ],
+        )
+        self.assertEqual(
+            expected["reported_totals"],
+            {item.section: str(item.amount.amount) for item in statement.reported_totals},
+        )
+        self.assertEqual(
+            ReconciliationStatus.MATCHED,
+            reconcile_statement(statement).status,
+        )
+
+    def test_deposit_parser_handles_concatenated_pdf_extraction(self) -> None:
+        source_pages = deposit_fixture_pages()
+        pages = (
+            source_pages[0],
+            source_pages[1],
+            source_pages[2].replace("\n", ""),
+            source_pages[3],
+        )
+        source = ValidatedPdfDocument(
+            Path("compressed.pdf"),
+            "compressed.pdf",
+            "2" * 64,
+            4,
+            pages,
+        )
+
+        statement = BankOfAmericaStatementParser().parse(source).statement
+
+        self.assertEqual(6, len(statement.transactions))
+        self.assertEqual(ReconciliationStatus.MATCHED, reconcile_statement(statement).status)
+
+    def test_deposit_parser_removes_sensitive_reference_fields(self) -> None:
+        source = ValidatedPdfDocument(
+            Path("deposit.pdf"),
+            "deposit.pdf",
+            "3" * 64,
+            4,
+            deposit_fixture_pages(),
+        )
+
+        statement = BankOfAmericaStatementParser().parse(source).statement
+        serialized = repr(statement)
+
+        self.assertNotIn("1111 2222 6789", serialized)
+        self.assertNotIn("SAFE01", serialized)
+        self.assertNotIn("TEST PERSON", serialized)
+        self.assertNotRegex(
+            " ".join(item.raw_description for item in statement.transactions),
+            r"\b(?=[A-Z0-9]{8,}\b)(?=[A-Z0-9]*\d)[A-Z0-9]+\b",
+        )
+        self.assertTrue(all(item.account_id == "ending-6789" for item in statement.transactions))
+        self.assertTrue(
+            all("statement_amount" in dict(item.source_metadata) for item in statement.transactions)
+        )
+
     def test_synthetic_statement_matches_expected_normalized_records(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.pdf"
