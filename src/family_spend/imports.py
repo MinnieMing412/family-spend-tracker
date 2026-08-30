@@ -12,6 +12,7 @@ from pathlib import Path
 from family_spend.domain.models import (
     ApprovedImport,
     DuplicateState,
+    ImportRecord,
     ImportStatus,
     NormalizedTransaction,
     ReviewState,
@@ -105,6 +106,18 @@ class SingleImportOutcome:
     imported_count: int
     exact_duplicate_count: int
     cache_id: str | None = None
+    disposition: str = "imported"
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedImport:
+    """Parsed and classified statement ready for the normal review path."""
+
+    source: Path
+    state: ReviewState
+    import_id: str
+    cache_id: str
+    existing_import: ImportRecord | None = None
 
 
 class SingleImportWorkflow:
@@ -131,6 +144,13 @@ class SingleImportWorkflow:
 
     def execute(self, source: Path, *, retain_cache: bool = False) -> SingleImportOutcome:
         """Run one PDF through the complete safe import path."""
+        return self.execute_prepared(
+            self.prepare(source),
+            retain_cache=retain_cache,
+        )
+
+    def prepare(self, source: Path) -> PreparedImport:
+        """Parse and classify one statement without reviewing or writing it."""
         results = self._ingestion.parse(source)
         if len(results) != 1:
             raise ValueError("single import accepts exactly one statement PDF")
@@ -138,14 +158,6 @@ class SingleImportWorkflow:
         import_id = f"import-{parsed.source_hash[:20]}"
         cache_id = f"cache-{parsed.source_hash[:20]}"
         existing = self._workbook.find_import_by_hash(parsed.source_hash)
-        if existing is not None and existing.status is ImportStatus.COMPLETE:
-            return SingleImportOutcome(
-                ImportStatus.SKIPPED,
-                "Statement was already imported; workbook state is unchanged.",
-                existing.import_id,
-                0,
-                len(existing.transaction_ids),
-            )
 
         fingerprinted = assign_fingerprints(parsed.transactions)
         fingerprint_values = tuple(
@@ -170,9 +182,38 @@ class SingleImportWorkflow:
             self._configuration,
             duplicates=duplicate_states,
         )
+        return PreparedImport(
+            source=source,
+            state=initial,
+            import_id=import_id,
+            cache_id=cache_id,
+            existing_import=existing,
+        )
+
+    def execute_prepared(
+        self,
+        prepared: PreparedImport,
+        *,
+        retain_cache: bool = False,
+        reviewer: ReviewPort | None = None,
+    ) -> SingleImportOutcome:
+        """Review and commit a prepared statement through the standard path."""
+        initial = prepared.state
+        import_id = prepared.import_id
+        cache_id = prepared.cache_id
+        existing = prepared.existing_import
+        if existing is not None and existing.status is ImportStatus.COMPLETE:
+            return SingleImportOutcome(
+                ImportStatus.SKIPPED,
+                "Statement was already imported; workbook state is unchanged.",
+                existing.import_id,
+                0,
+                len(existing.transaction_ids),
+                disposition="duplicate_statement",
+            )
         try:
             self._cache.save(self._cache_record(cache_id, initial, stage="pending_review"))
-            decision = self._reviewer.review(initial)
+            decision = (reviewer or self._reviewer).review(initial)
             if decision.statement.statement_id != initial.statement.statement_id:
                 raise ValueError("review decision does not belong to the parsed statement")
             self._cache.save(self._cache_record(cache_id, decision, stage="reviewed"))
@@ -186,6 +227,7 @@ class SingleImportWorkflow:
                         row.duplicate_state is DuplicateState.EXACT for row in decision.rows
                     ),
                     cache_id if retain_cache else None,
+                    "cancelled",
                 )
             if decision.status is not ReviewStatus.APPROVED:
                 raise ValueError("review must explicitly approve or cancel")
@@ -234,6 +276,9 @@ class SingleImportWorkflow:
                 len(result.transaction_ids),
                 exact_count,
                 cache_id if retain_cache else None,
+                "duplicate_statement"
+                if result.status is ImportStatus.SKIPPED
+                else "imported",
             )
         finally:
             if not retain_cache:

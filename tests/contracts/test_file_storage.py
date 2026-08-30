@@ -5,11 +5,30 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from family_spend.adapters.local import FileCredentialStore, FileSettingsStore
-from family_spend.domain.models import LocalSettings
+from family_spend.adapters.local import (
+    FileCheckpointStore,
+    FileCredentialStore,
+    FileSettingsStore,
+)
+from family_spend.domain.models import BackfillCheckpoint, LocalSettings
 
 
 class FileSettingsStoreContractTests(unittest.TestCase):
+    def test_backfill_checkpoint_round_trip_is_private(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = FileCheckpointStore(Path(directory) / "checkpoints")
+            root_id = "a" * 64
+            checkpoint = BackfillCheckpoint(root_id, "plan-1", ("hash-1",), ("bad.pdf",))
+
+            store.save(checkpoint)
+
+            path = store.path_for(root_id)
+            self.assertEqual(checkpoint, store.load(root_id))
+            self.assertEqual(0o600, path.stat().st_mode & 0o777)
+            self.assertEqual(0o700, path.parent.stat().st_mode & 0o777)
+            store.delete(root_id)
+            self.assertIsNone(store.load(root_id))
+
     def test_settings_round_trip_without_serializing_oauth_secrets(self) -> None:
         with TemporaryDirectory() as directory:
             settings_path = Path(directory) / "settings.json"

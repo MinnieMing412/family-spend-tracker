@@ -183,6 +183,22 @@ class ReviewPort(Protocol):
         ...
 
 
+class BackfillReviewPort(Protocol):
+    """Collect the three explicit decisions required by a folder backfill."""
+
+    def confirm_plan(self, relative_paths: tuple[str, ...]) -> bool:
+        """Approve the complete discovered file list before parsing begins."""
+        ...
+
+    def approve_clean(self, states: tuple[ReviewState, ...]) -> bool:
+        """Bulk-approve only statements classified as clean by the domain rule."""
+        ...
+
+    def skip_rejected(self, source_name: str, reason: str) -> bool:
+        """Explicitly decide whether a rejected file may be skipped."""
+        ...
+
+
 class CheckpointStore(Protocol):
     """Persist progress so a historical backfill can resume safely."""
 

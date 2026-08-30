@@ -5,13 +5,14 @@ from __future__ import annotations
 from family_spend.adapters.google import GoogleApiSheetsClient, GoogleWorkbookFactory
 from family_spend.adapters.google_auth import GoogleCredentialManager
 from family_spend.adapters.local import (
+    FileCheckpointStore,
     FileCredentialStore,
     FileSettingsStore,
     FileStructuredCache,
     SystemClock,
     default_application_directory,
 )
-from family_spend.adapters.terminal import TerminalReviewPort
+from family_spend.adapters.terminal import TerminalBackfillReviewPort, TerminalReviewPort
 from family_spend.application import FamilySpendApplication
 from family_spend.domain.models import Institution
 from family_spend.ingestion import (
@@ -90,4 +91,6 @@ def build_application() -> FamilySpendApplication:
         reviewer=TerminalReviewPort(engine=review_engine),
         structured_cache=FileStructuredCache(application_directory / "cache"),
         clock=SystemClock(),
+        checkpoint_store=FileCheckpointStore(application_directory / "checkpoints"),
+        backfill_reviewer=TerminalBackfillReviewPort(),
     )

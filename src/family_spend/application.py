@@ -4,10 +4,13 @@ from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import urlparse
 
+from family_spend.backfill import BackfillWorkflow
 from family_spend.domain.models import LocalSettings, ReviewStatus
 from family_spend.imports import SingleImportWorkflow
 from family_spend.ingestion import StatementIngestionService, discover_pdfs
 from family_spend.ports import (
+    BackfillReviewPort,
+    CheckpointStore,
     Clock,
     CredentialManager,
     ReviewPort,
@@ -64,6 +67,16 @@ class CliApplication(Protocol):
         """Parse, review, and import exactly one statement PDF."""
         ...
 
+    def backfill(
+        self,
+        source: Path,
+        *,
+        resume: bool = False,
+        retain_cache: bool = False,
+    ) -> str:
+        """Import a historical statement directory with resumable checkpoints."""
+        ...
+
 
 class FamilySpendApplication:
     """Coordinate CLI requests using settings and workbook storage boundaries."""
@@ -81,6 +94,8 @@ class FamilySpendApplication:
         reviewer: ReviewPort | None = None,
         structured_cache: StructuredCache | None = None,
         clock: Clock | None = None,
+        checkpoint_store: CheckpointStore | None = None,
+        backfill_reviewer: BackfillReviewPort | None = None,
     ) -> None:
         """Create the application with its local settings and workbook providers."""
         self._settings = settings
@@ -93,6 +108,8 @@ class FamilySpendApplication:
         self._reviewer = reviewer
         self._structured_cache = structured_cache
         self._clock = clock
+        self._checkpoint_store = checkpoint_store
+        self._backfill_reviewer = backfill_reviewer
 
     def setup(
         self,
@@ -245,3 +262,42 @@ class FamilySpendApplication:
             f"{len(decision.saved_rules)} merchant rules selected. "
             "No transactions were uploaded."
         )
+
+    def backfill(
+        self,
+        source: Path,
+        *,
+        resume: bool = False,
+        retain_cache: bool = False,
+    ) -> str:
+        """Run a sequential historical folder import with explicit approvals."""
+        if (
+            self._ingestion is None
+            or self._review_engine is None
+            or self._reviewer is None
+            or self._backfill_reviewer is None
+            or self._structured_cache is None
+            or self._checkpoint_store is None
+            or self._clock is None
+        ):
+            raise ValueError("backfill dependencies are not configured")
+        settings = self._settings.load()
+        if settings is None:
+            raise ValueError("no workbook is connected")
+        if self._workbooks is not None:
+            workbook = self._workbooks.connect(settings.workbook_id)
+        elif self._workbook is not None:
+            workbook = self._workbook
+        else:
+            raise ValueError("workbook dependency is not configured")
+        outcome = BackfillWorkflow(
+            ingestion=self._ingestion,
+            review_engine=self._review_engine,
+            reviewer=self._reviewer,
+            backfill_reviewer=self._backfill_reviewer,
+            workbook=cast(WorkbookGateway, workbook),
+            cache=self._structured_cache,
+            checkpoints=self._checkpoint_store,
+            clock=self._clock,
+        ).execute(source, resume=resume, retain_cache=retain_cache)
+        return outcome.summary()

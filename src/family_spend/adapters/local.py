@@ -11,11 +11,17 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from family_spend.domain.models import LocalSettings, StructuredCacheRecord
+from family_spend.domain.models import (
+    BackfillCheckpoint,
+    LocalSettings,
+    StructuredCacheRecord,
+)
 
 _SETTINGS_SCHEMA_VERSION = 1
 _CACHE_SCHEMA_VERSION = 1
 _CACHE_ID = re.compile(r"^[a-z0-9-]+$")
+_CHECKPOINT_SCHEMA_VERSION = 1
+_ROOT_ID = re.compile(r"^[a-f0-9]{64}$")
 
 
 def default_application_directory() -> Path:
@@ -166,6 +172,53 @@ class FileStructuredCache:
     def delete(self, cache_id: str) -> None:
         """Delete one retained record if present."""
         self.path_for(cache_id).unlink(missing_ok=True)
+
+
+class FileCheckpointStore:
+    """Persist resumable backfill progress in private JSON files."""
+
+    def __init__(self, directory: Path) -> None:
+        self._directory = directory
+
+    def path_for(self, root_id: str) -> Path:
+        if _ROOT_ID.fullmatch(root_id) is None:
+            raise ValueError("backfill root ID is invalid")
+        return self._directory / f"{root_id}.json"
+
+    def load(self, root_id: str) -> BackfillCheckpoint | None:
+        path = self.path_for(root_id)
+        if not path.exists():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if raw.get("schema_version") != _CHECKPOINT_SCHEMA_VERSION:
+            raise ValueError("backfill checkpoint schema version is incompatible")
+        return BackfillCheckpoint(
+            root_id=str(raw["root_id"]),
+            plan_hash=str(raw["plan_hash"]),
+            completed_statement_hashes=tuple(
+                str(value) for value in raw.get("completed_statement_hashes", ())
+            ),
+            failed_source_names=tuple(
+                str(value) for value in raw.get("failed_source_names", ())
+            ),
+        )
+
+    def save(self, checkpoint: BackfillCheckpoint) -> None:
+        _write_private_json(
+            self.path_for(checkpoint.root_id),
+            {
+                "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+                "root_id": checkpoint.root_id,
+                "plan_hash": checkpoint.plan_hash,
+                "completed_statement_hashes": list(
+                    checkpoint.completed_statement_hashes
+                ),
+                "failed_source_names": list(checkpoint.failed_source_names),
+            },
+        )
+
+    def delete(self, root_id: str) -> None:
+        self.path_for(root_id).unlink(missing_ok=True)
 
 
 class SystemClock:

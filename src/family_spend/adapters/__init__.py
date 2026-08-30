@@ -1,6 +1,6 @@
 """Boundary adapters supplied by Family Spend Tracker."""
 
-from family_spend.adapters.local import FileStructuredCache, SystemClock
+from family_spend.adapters.local import FileCheckpointStore, FileStructuredCache, SystemClock
 from family_spend.adapters.memory import (
     FixedClock,
     InMemoryCheckpointStore,
@@ -14,9 +14,10 @@ from family_spend.adapters.memory import (
     StaticParserRegistry,
     StaticStatementParser,
 )
-from family_spend.adapters.terminal import TerminalReviewPort
+from family_spend.adapters.terminal import TerminalBackfillReviewPort, TerminalReviewPort
 
 __all__ = [
+    "FileCheckpointStore",
     "FileStructuredCache",
     "FixedClock",
     "InMemoryCheckpointStore",
@@ -30,5 +31,6 @@ __all__ = [
     "StaticParserRegistry",
     "StaticStatementParser",
     "SystemClock",
+    "TerminalBackfillReviewPort",
     "TerminalReviewPort",
 ]

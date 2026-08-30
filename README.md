@@ -3,9 +3,9 @@
 A privacy-conscious macOS CLI for importing AMEX, Bank of America, and Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
 
 The project is under active implementation. The current vertical slice imports
-one reviewed AMEX, Bank of America, or Chase statement into Google
-Sheets with duplicate protection,
-retry-safe writes, and an import audit record.
+reviewed AMEX, Bank of America, and Chase statements into Google Sheets with
+duplicate protection, retry-safe writes, and import audit records. Historical
+folders can be processed sequentially with resumable checkpoints.
 
 ## Development setup
 
@@ -86,8 +86,20 @@ commands.
 Approval writes the reviewed transactions and any selected merchant rules. The
 same statement is skipped on repeat, exact overlapping rows are omitted, and
 near-duplicates require an explicit review decision. This command intentionally
-accepts exactly one PDF; recursive folder processing belongs to the later
-backfill workflow.
+accepts exactly one PDF.
+
+For a historical folder, use recursive backfill:
+
+```bash
+family-spend backfill /path/to/statements
+family-spend backfill /path/to/statements --resume
+```
+
+Backfill shows the complete discovered path list before parsing, orders supported
+statements by closing date, bulk-approves only clean statements after confirmation,
+and routes exceptions through the normal individual review. It checkpoints after
+each attempted statement outside the repository. The workbook remains the
+authoritative completion record when a run resumes.
 
 Bank of America support covers consumer credit-card and deposit-account layouts documented in
 [the Phase 5A architecture note](docs/architecture/phase-5a-bank-of-america-parser.md),
@@ -123,6 +135,7 @@ shows the configured cache directory.
 - [Phase 4 single-import architecture](docs/architecture/phase-4-single-import.md)
 - [Phase 5A Bank of America parser architecture](docs/architecture/phase-5a-bank-of-america-parser.md)
 - [Phase 5B Chase parser architecture](docs/architecture/phase-5b-chase-parser.md)
+- [Phase 6 backfill architecture](docs/architecture/phase-6-backfill.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy
