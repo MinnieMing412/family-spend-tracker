@@ -1,0 +1,36 @@
+BANK OF AMERICA
+Synthetic Credit Card Statement
+Account Number: XXXX XXXX XXXX 4321
+Billing Cycle: 05/16/2026 to 06/15/2026
+Statement Closing Date: 06/15/2026
+
+Account Summary
+Payments and Other Credits -$525.00
+Purchases and Adjustments $221.00
+Fees Charged $29.00
+Interest Charged $4.00
+
+Transactions
+Transaction Date Posting Date Description Reference Number Account Number Amount
+Cardholder: MEMBER ALPHA Account Number: XXXX 4321
+Payments and Other Credits
+05/20 05/20 ONLINE PAYMENT THANK YOU 123456789012345 4321 -$500.00
+06/05 06/06 RETURNED MERCHANDISE 123456789012346 4321 $25.00CR
+
+Purchases and Adjustments
+05/18 05/19 GROCERY MARKET 123456789012347 4321 $75.25
+05/22 05/23 BOOK STORE 123456789012348 4321 $45.75
+
+BANK OF AMERICA
+Account Number: XXXX XXXX XXXX 4321
+Transactions continued
+Cardholder: MEMBER ALPHA Account Number: XXXX 4321
+Purchases and Adjustments Continued
+06/01 06/02 HOTEL
+RESERVATION 123456789012349 4321 $100.00
+
+Fees Charged
+06/10 06/10 LATE FEE 123456789012350 4321 $29.00
+
+Interest Charged
+06/15 06/15 INTEREST CHARGE ON PURCHASES 123456789012351 4321 $4.00

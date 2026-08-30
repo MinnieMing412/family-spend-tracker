@@ -225,6 +225,8 @@ def enrich_transaction(
 
 def _types_for_section(section: str) -> frozenset[TransactionType] | None:
     normalized = "_".join(section.casefold().replace("&", "and").split())
+    if normalized.startswith("payments_and_other_credits"):
+        return frozenset({TransactionType.PAYMENT, TransactionType.MERCHANT_CREDIT})
     if normalized.startswith("payments"):
         return frozenset({TransactionType.PAYMENT})
     if normalized.startswith("credits"):
@@ -256,6 +258,31 @@ def reconcile_statement(statement: NormalizedStatement) -> ReconciliationResult:
     """Reconcile each supported reported section with exact decimal sums."""
     lines: list[ReconciliationLine] = []
     for total in statement.reported_totals:
+        normalized_section = "_".join(total.section.casefold().split())
+        if normalized_section in {
+            "deposits_and_other_additions",
+            "withdrawals_and_other_subtractions",
+        }:
+            extracted = sum(
+                (
+                    Decimal(metadata["statement_amount"])
+                    for transaction in statement.transactions
+                    if (metadata := dict(transaction.source_metadata)).get(
+                        "statement_section"
+                    )
+                    == normalized_section
+                    and "statement_amount" in metadata
+                ),
+                Decimal("0"),
+            )
+            lines.append(
+                ReconciliationLine(
+                    section=total.section,
+                    reported=total.amount,
+                    extracted=Money(extracted),
+                )
+            )
+            continue
         transaction_types = _types_for_section(total.section)
         if transaction_types is None:
             continue

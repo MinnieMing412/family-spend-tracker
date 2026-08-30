@@ -1,0 +1,21 @@
+{
+  "account_id": "ending-6789",
+  "start_date": "2025-12-09",
+  "end_date": "2026-01-07",
+  "closing_date": "2026-01-07",
+  "transaction_count": 6,
+  "transactions": [
+    ["2025-12-17", "transfer", "250.00", false],
+    ["2025-12-19", "transfer", "2000.00", false],
+    ["2025-12-20", "payment", "-300.00", false],
+    ["2025-12-21", "purchase", "15.50", true],
+    ["2025-12-22", "transfer", "-100.00", false],
+    ["2025-12-23", "purchase", "10.00", true]
+  ],
+  "reported_totals": {
+    "deposits_and_other_additions": "2250.00",
+    "withdrawals_and_other_subtractions": "-425.50",
+    "checks": "-0.00",
+    "fees": "-0.00"
+  }
+}
