@@ -20,7 +20,11 @@ from family_spend.ingestion import (
     PdfValidator,
     StatementIngestionService,
 )
-from family_spend.parsers import AmexStatementParser, BankOfAmericaStatementParser
+from family_spend.parsers import (
+    AmexStatementParser,
+    BankOfAmericaStatementParser,
+    ChaseStatementParser,
+)
 from family_spend.review import ReviewEngine
 
 
@@ -34,6 +38,7 @@ def build_application() -> FamilySpendApplication:
     workbooks = GoogleWorkbookFactory(sheets)
     amex_parser = AmexStatementParser()
     bank_of_america_parser = BankOfAmericaStatementParser()
+    chase_parser = ChaseStatementParser()
     ingestion = StatementIngestionService(
         PdfValidator(),
         MarkerParserRegistry(
@@ -58,6 +63,17 @@ def build_application() -> FamilySpendApplication:
                         "Purchases and Adjustments",
                     ),
                     parser=bank_of_america_parser,
+                    minimum_markers=2,
+                ),
+                ParserRegistration(
+                    institution=Institution.CHASE,
+                    markers=(
+                        "CHASE",
+                        "Account Summary",
+                        "Account Activity",
+                        "Payments and Other Credits",
+                    ),
+                    parser=chase_parser,
                     minimum_markers=2,
                 ),
             )

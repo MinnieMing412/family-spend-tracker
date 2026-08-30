@@ -1,0 +1,35 @@
+amazon | CHASE
+Synthetic Prime Visa Statement
+ACCOUNT SUMMARY
+Account Number: XXXX XXXX XXXX 9174
+Previous Balance $500.00
+Payment, Credits -$500.00
+Purchases +$99.82
+Cash Advances $0.00
+Balance Transfers $0.00
+Fees Charged $0.00
+Interest Charged $0.00
+New Balance $99.82
+Opening/Closing Date 12/03/25 - 01/02/26
+
+Information About Your Account
+
+CHASE
+ACCOUNT ACTIVITY
+Date of Transaction Merchant Name or Transaction Description $ Amount
+PAYMENTS AND OTHER CREDITS
+12/26 AUTOMATIC PAYMENT - THANK YOU -500.00
+PURCHASE
+12/02 AMAZON MKTPL SYNTHETIC ORDER WA 27.97
+Order Number SAFE-ORDER-ONE
+12/02 AMAZON MKTPL SYNTHETIC BOOK WA 23.43
+12/07 AMAZON MKTPL SYNTHETIC HOME WA 11.65
+12/06 WHOLEFOODS STC 10267 CUPERTINO CA 29.16
+12/07 AMAZON MKTPL SYNTHETIC MUSIC WA 7.61
+
+2026 Totals Year-to-Date
+Total fees charged in 2026 $0.00
+Total interest charged in 2026 $0.00
+INTEREST CHARGES
+
+This page intentionally left blank
