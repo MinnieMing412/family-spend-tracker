@@ -78,7 +78,7 @@ class PdfValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(FamilySpendError, "no extractable text"):
                 PdfValidator().validate(path)
 
-    def test_rejects_an_encrypted_pdf(self) -> None:
+    def test_rejects_a_password_locked_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source.pdf"
@@ -86,8 +86,21 @@ class PdfValidationTests(unittest.TestCase):
             write_text_pdf(source, ("Synthetic statement",))
             encrypt_pdf(source, encrypted)
 
-            with self.assertRaisesRegex(FamilySpendError, "Encrypted PDF"):
+            with self.assertRaisesRegex(FamilySpendError, "Password-protected PDF"):
                 PdfValidator().validate(encrypted)
+
+    def test_accepts_owner_encryption_that_opens_without_a_password(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            encrypted = root / "encrypted.pdf"
+            write_text_pdf(source, ("Synthetic owner-encrypted statement",))
+            encrypt_pdf(source, encrypted, password="")
+
+            validated = PdfValidator().validate(encrypted)
+
+            self.assertEqual(1, validated.page_count)
+            self.assertIn("owner-encrypted", validated.page_texts[0])
 
     def test_rejects_a_corrupt_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

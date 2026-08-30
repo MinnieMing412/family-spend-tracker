@@ -1,0 +1,23 @@
+{
+  "account_id": "ending-9174",
+  "start_date": "2025-12-03",
+  "end_date": "2026-01-02",
+  "closing_date": "2026-01-02",
+  "transaction_count": 6,
+  "transactions": [
+    ["2025-12-26", "payment", "-500.00"],
+    ["2025-12-02", "purchase", "27.97"],
+    ["2025-12-02", "purchase", "23.43"],
+    ["2025-12-07", "purchase", "11.65"],
+    ["2025-12-06", "purchase", "29.16"],
+    ["2025-12-07", "purchase", "7.61"]
+  ],
+  "reported_totals": {
+    "payments_and_other_credits": "-500.00",
+    "new_charges": "99.82",
+    "cash_advances": "0.00",
+    "balance_transfers": "0.00",
+    "fees": "0.00",
+    "interest_charged": "0.00"
+  }
+}

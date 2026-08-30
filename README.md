@@ -3,7 +3,7 @@
 A privacy-conscious macOS CLI for importing AMEX, Bank of America, and Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
 
 The project is under active implementation. The current vertical slice imports
-one reviewed AMEX or supported Bank of America statement into Google
+one reviewed AMEX, Bank of America, or Chase statement into Google
 Sheets with duplicate protection,
 retry-safe writes, and an import audit record.
 
@@ -70,7 +70,7 @@ removes these local files and does not delete the Google workbook.
 ## Review a supported statement
 
 After connecting a workbook and populating its member/account configuration,
-import one text-bearing AMEX or Bank of America statement:
+import one supported text-bearing statement:
 
 ```bash
 family-spend import /path/to/statement.pdf
@@ -95,6 +95,12 @@ including account-summary totals, continuation pages, payments/credits,
 purchases, transfers, deposits, cash advances, fees, and interest. A detected but
 unsupported BOA layout fails with an explicit diagnostic instead of guessing.
 
+Chase support covers the consumer credit-card Account Summary and Account
+Activity layout documented in
+[the Phase 5B architecture note](docs/architecture/phase-5b-chase-parser.md).
+Owner-restricted PDFs that open without a password are supported; statements
+that require a password remain rejected.
+
 Temporary structured review data is deleted by default. To retain a private,
 owner-readable diagnostic record outside the repository, run:
 
@@ -116,6 +122,7 @@ shows the configured cache directory.
 - [Phase 3 review and rules architecture](docs/architecture/phase-3-review-and-rules.md)
 - [Phase 4 single-import architecture](docs/architecture/phase-4-single-import.md)
 - [Phase 5A Bank of America parser architecture](docs/architecture/phase-5a-bank-of-america-parser.md)
+- [Phase 5B Chase parser architecture](docs/architecture/phase-5b-chase-parser.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy

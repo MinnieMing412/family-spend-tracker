@@ -239,6 +239,10 @@ def _types_for_section(section: str) -> frozenset[TransactionType] | None:
                 TransactionType.OTHER,
             }
         )
+    if normalized.startswith("cash_advances"):
+        return frozenset({TransactionType.CASH_ADVANCE})
+    if normalized.startswith("balance_transfers"):
+        return frozenset({TransactionType.TRANSFER})
     if normalized.startswith("fees"):
         return frozenset({TransactionType.FEE})
     if normalized.startswith("interest"):

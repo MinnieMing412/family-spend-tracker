@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,16 +61,16 @@ class PdfValidator:
     """Validate PDF structure and extract page text before parser dispatch."""
 
     def validate(self, path: Path) -> ValidatedPdfDocument:
-        """Reject encrypted, corrupt, empty, or image-only documents."""
+        """Reject password-locked, corrupt, empty, or image-only documents."""
         try:
             digest = hashlib.sha256()
             with path.open("rb") as source_file:
                 for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
                     digest.update(chunk)
             reader = PdfReader(path, strict=False)
-            if reader.is_encrypted:
+            if reader.is_encrypted and reader.decrypt("") == 0:
                 raise FamilySpendError(
-                    f"Encrypted PDF is not supported: {path.name}",
+                    f"Password-protected PDF is not supported: {path.name}",
                     2,
                 )
             if not reader.pages:
@@ -97,11 +98,18 @@ class PdfValidator:
 
     @staticmethod
     def _extract_page_text(page: PageObject) -> str:
-        """Prefer layout extraction while remaining compatible with pypdf releases."""
+        """Extract layout text while silencing pypdf's whitespace-cap notice."""
+        logger = logging.getLogger(
+            "pypdf._text_extraction._layout_mode._fixed_width_page"
+        )
+        previous_level = logger.level
+        logger.setLevel(logging.ERROR)
         try:
             extracted = page.extract_text(extraction_mode="layout")
         except TypeError:
             extracted = page.extract_text()
+        finally:
+            logger.setLevel(previous_level)
         return extracted or ""
 
 
