@@ -37,9 +37,7 @@ _SPEND_TYPES = frozenset(
         TransactionType.PURCHASE,
         TransactionType.MERCHANT_CREDIT,
         TransactionType.FEE,
-        TransactionType.INTEREST,
         TransactionType.CASH_ADVANCE,
-        TransactionType.OTHER,
     }
 )
 _NOISE_PREFIX = re.compile(r"^(?:SQ|TST|SP)\s*[*-]\s*", re.IGNORECASE)

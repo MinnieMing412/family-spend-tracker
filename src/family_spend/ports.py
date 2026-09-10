@@ -120,6 +120,10 @@ class WorkbookConnection(Protocol):
         """Create missing required sheets, headers, metadata, and categories."""
         ...
 
+    def provision_dashboard(self) -> None:
+        """Idempotently create or refresh derived dashboard structures."""
+        ...
+
     def validate_schema(self) -> None:
         """Raise an error when required sheets or columns are missing."""
         ...

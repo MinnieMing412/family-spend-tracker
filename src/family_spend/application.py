@@ -131,6 +131,7 @@ class FamilySpendApplication:
             else:
                 workbook = self._workbooks.connect(_workbook_id_from_url(workbook_url))
                 workbook.validate_schema()
+                workbook.provision_dashboard()
             self._settings.save(
                 LocalSettings(
                     workbook_id=workbook.workbook_id,
@@ -144,7 +145,10 @@ class FamilySpendApplication:
         categories = ", ".join(
             category.display_name for category in workbook.load_configuration().categories
         )
-        return f"Connected workbook {workbook.workbook_id}. Seeded categories: {categories}."
+        return (
+            f"Connected workbook {workbook.workbook_id}. "
+            f"Seeded categories: {categories}. Dashboard ready."
+        )
 
     def status(self) -> str:
         """Describe the connected workbook, or explain that none is connected."""

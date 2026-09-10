@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from family_spend.adapters.google import GoogleWorkbookFactory
+from family_spend.adapters.google import GoogleApiSheetsClient, GoogleWorkbookFactory
 from family_spend.adapters.google_auth import (
     GOOGLE_EMAIL_SCOPE,
     GOOGLE_OPENID_SCOPE,
@@ -19,6 +20,7 @@ from family_spend.adapters.memory import (
     InMemorySheetsClient,
     InMemoryStructuredCache,
 )
+from family_spend.dashboard import build_dashboard_layout
 from family_spend.domain.models import ImportStatus
 from family_spend.imports import SingleImportWorkflow
 from family_spend.review import ReviewEngine
@@ -58,6 +60,82 @@ class FaultInjectingSheetsClient(InMemorySheetsClient):
 
 
 class GoogleWorkbookGatewayContractTests(unittest.TestCase):
+    def test_google_client_replaces_dashboard_values_and_native_charts(self) -> None:
+        class Request:
+            def __init__(self, result: dict[str, object] | None = None) -> None:
+                self._result = result or {}
+
+            def execute(self) -> dict[str, object]:
+                return self._result
+
+        class Values:
+            def __init__(self) -> None:
+                self.updates: list[dict[str, object]] = []
+                self.clears: list[dict[str, object]] = []
+
+            def clear(self, **kwargs: object) -> Request:
+                self.clears.append(kwargs)
+                return Request()
+
+            def update(self, **kwargs: object) -> Request:
+                self.updates.append(kwargs)
+                return Request()
+
+        class Spreadsheets:
+            def __init__(self) -> None:
+                self.value_resource = Values()
+                self.batch_updates: list[dict[str, object]] = []
+
+            def get(self, **kwargs: object) -> Request:
+                del kwargs
+                return Request(
+                    {
+                        "sheets": [
+                            {
+                                "properties": {"sheetId": 7, "title": "Dashboard"},
+                                "charts": [{"chartId": 99, "spec": {"title": "Old"}}],
+                            }
+                        ]
+                    }
+                )
+
+            def values(self) -> Values:
+                return self.value_resource
+
+            def batchUpdate(self, **kwargs: object) -> Request:
+                self.batch_updates.append(kwargs)
+                return Request()
+
+        class Service:
+            def __init__(self, spreadsheets: Spreadsheets) -> None:
+                self._spreadsheets = spreadsheets
+
+            def spreadsheets(self) -> Spreadsheets:
+                return self._spreadsheets
+
+        resource = Spreadsheets()
+        with TemporaryDirectory() as directory:
+            client = GoogleApiSheetsClient(
+                FileCredentialStore(Path(directory) / "credentials.json"),
+                service_builder=lambda: Service(resource),
+            )
+
+            client.replace_dashboard(
+                "workbook-1",
+                build_dashboard_layout(member_count=2, category_count=4),
+            )
+
+        self.assertEqual(1, len(resource.value_resource.clears))
+        self.assertEqual(
+            "USER_ENTERED",
+            resource.value_resource.updates[0]["valueInputOption"],
+        )
+        serialized = json.dumps(resource.batch_updates[0], sort_keys=True)
+        self.assertIn('"objectId": 99', serialized)
+        self.assertEqual(3, serialized.count('"addChart"'))
+        self.assertIn('"targetAxis": "BOTTOM_AXIS"', serialized)
+        self.assertIn('"targetAxis": "LEFT_AXIS"', serialized)
+
     def test_partial_import_retries_converge_without_duplicate_rows(self) -> None:
         scenarios = (
             (1, False),  # before the pending audit write
@@ -65,10 +143,13 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
             (4, False),  # before the final audit status update
         )
         for write_number, after_write in scenarios:
-            with self.subTest(
-                write_number=write_number,
-                after_write=after_write,
-            ), TemporaryDirectory() as directory:
+            with (
+                self.subTest(
+                    write_number=write_number,
+                    after_write=after_write,
+                ),
+                TemporaryDirectory() as directory,
+            ):
                 sheets = FaultInjectingSheetsClient()
                 gateway = GoogleWorkbookFactory(sheets).create("Family Spending")
                 gateway.provision_schema()
@@ -114,9 +195,7 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
                     workflow.execute(path)
                 result = workflow.execute(path)
 
-                transaction_rows = sheets.read_rows(
-                    gateway.workbook_id, "Transactions"
-                )[2:]
+                transaction_rows = sheets.read_rows(gateway.workbook_id, "Transactions")[2:]
                 rule_rows = sheets.read_rows(gateway.workbook_id, "Merchant Rules")[2:]
                 import_rows = sheets.read_rows(gateway.workbook_id, "Imports")[2:]
                 self.assertEqual(ImportStatus.COMPLETE, result.status)
@@ -155,6 +234,11 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
             2,
             sheets.header_row_count(gateway.workbook_id, "Categories"),
         )
+        dashboard = sheets.dashboard_layout(gateway.workbook_id)
+        self.assertIsNotNone(dashboard)
+        assert dashboard is not None
+        self.assertEqual(3, len(dashboard.charts))
+        self.assertEqual(4, len(dashboard.validations))
 
     def test_repeated_provisioning_preserves_user_category_edits(self) -> None:
         sheets = InMemorySheetsClient()
