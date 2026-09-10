@@ -212,3 +212,46 @@ class TerminalReviewPort:
 
     def _write(self, value: str) -> None:
         self._output.write(value + "\n")
+
+
+class TerminalBackfillReviewPort:
+    """Present backfill scope and bulk decisions without exposing transaction text."""
+
+    def __init__(
+        self,
+        *,
+        input_stream: TextIO | None = None,
+        output_stream: TextIO | None = None,
+    ) -> None:
+        self._input = input_stream or sys.stdin
+        self._output = output_stream or sys.stdout
+
+    def confirm_plan(self, relative_paths: tuple[str, ...]) -> bool:
+        self._write(f"Discovered {len(relative_paths)} PDF statement(s):")
+        for path in relative_paths:
+            self._write(f"  {path}")
+        return self._confirm("Parse this complete backfill plan? [y/N] ")
+
+    def approve_clean(self, states: tuple[ReviewState, ...]) -> bool:
+        if not states:
+            return True
+        self._write(f"Clean statements ready for bulk approval: {len(states)}")
+        for state in states:
+            statement = state.statement
+            self._write(
+                f"  {statement.end_date.isoformat()} | {statement.institution.value} | "
+                f"{statement.source_name} | {len(state.rows)} transaction(s)"
+            )
+        return self._confirm("Approve all clean statements? [y/N] ")
+
+    def skip_rejected(self, source_name: str, reason: str) -> bool:
+        self._write(f"Rejected {source_name}: {reason}")
+        return self._confirm("Record rejection and continue? [y/N] ")
+
+    def _confirm(self, prompt: str) -> bool:
+        self._output.write(prompt)
+        self._output.flush()
+        return self._input.readline().strip().casefold() in {"y", "yes"}
+
+    def _write(self, value: str) -> None:
+        self._output.write(value + "\n")

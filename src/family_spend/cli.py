@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.add_argument("--retain-cache", action="store_true")
 
     backfill_parser = commands.add_parser("backfill", help="Backfill a statement folder.")
-    backfill_parser.add_argument("source")
+    backfill_parser.add_argument("source", type=Path)
     backfill_parser.add_argument("--resume", action="store_true")
     backfill_parser.add_argument("--retain-cache", action="store_true")
 
@@ -74,6 +74,7 @@ def main(
             "validate-workbook",
             "disconnect",
             "import",
+            "backfill",
         }:
             from family_spend.bootstrap import build_application
 
@@ -101,6 +102,16 @@ def main(
             print(
                 application.import_statement(
                     arguments.source,
+                    retain_cache=arguments.retain_cache,
+                ),
+                file=stdout,
+            )
+            return 0
+        if arguments.command == "backfill" and application is not None:
+            print(
+                application.backfill(
+                    arguments.source,
+                    resume=arguments.resume,
                     retain_cache=arguments.retain_cache,
                 ),
                 file=stdout,
