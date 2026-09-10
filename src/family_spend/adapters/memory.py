@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 
+from family_spend.dashboard import DashboardLayout, build_dashboard_layout
 from family_spend.domain.models import (
     ApprovedImport,
     BackfillCheckpoint,
@@ -132,6 +133,7 @@ class InMemoryWorkbookGateway:
         self._schema_version: str | None = SCHEMA_VERSION
         self._worksheets = tuple(schema.name for schema in WORKSHEET_SCHEMAS)
         self._commit_failure_stage: str | None = None
+        self._dashboard_layout: DashboardLayout | None = None
 
     @property
     def workbook_id(self) -> str:
@@ -156,6 +158,19 @@ class InMemoryWorkbookGateway:
             ),
             merchant_rules=self._configuration.merchant_rules,
         )
+        self.provision_dashboard()
+
+    def provision_dashboard(self) -> None:
+        """Replace the simulated derived dashboard definition."""
+        self._dashboard_layout = build_dashboard_layout(
+            member_count=sum(member.active for member in self._configuration.members),
+            category_count=sum(category.active for category in self._configuration.categories),
+        )
+
+    @property
+    def dashboard_layout(self) -> DashboardLayout | None:
+        """Expose the simulated dashboard for boundary-state assertions."""
+        return self._dashboard_layout
 
     def worksheet_names(self) -> tuple[str, ...]:
         """Return worksheet names in their provisioned order."""
@@ -340,6 +355,7 @@ class InMemorySheetsClient:
             "title": title,
             "version": None,
             "sheets": {"Sheet1": []},
+            "dashboard_layout": None,
         }
         return workbook_id
 
@@ -419,6 +435,25 @@ class InMemorySheetsClient:
                 stored_rows[target] = replacement
             else:
                 stored_rows.append(replacement)
+
+    def replace_dashboard(self, workbook_id: str, layout: DashboardLayout) -> None:
+        """Replace simulated Dashboard rows and chart metadata atomically."""
+        workbook = self._workbooks.get(workbook_id)
+        if workbook is None:
+            raise ValueError(f"workbook not found: {workbook_id}")
+        sheets = self._sheets(workbook_id)
+        if "Dashboard" not in sheets:
+            raise ValueError("worksheet not found: Dashboard")
+        sheets["Dashboard"] = [list(row) for row in layout.rows]
+        workbook["dashboard_layout"] = layout
+
+    def dashboard_layout(self, workbook_id: str) -> DashboardLayout | None:
+        """Return the simulated dashboard definition for contract tests."""
+        workbook = self._workbooks.get(workbook_id)
+        if workbook is None:
+            raise ValueError(f"workbook not found: {workbook_id}")
+        layout = workbook["dashboard_layout"]
+        return layout if isinstance(layout, DashboardLayout) else None
 
     def header_row_count(self, workbook_id: str, worksheet: str) -> int:
         """Return the two schema header rows when both are populated."""

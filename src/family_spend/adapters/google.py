@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from datetime import date, datetime
 from decimal import Decimal
@@ -10,6 +11,7 @@ from typing import Any, Protocol, cast
 
 from family_spend.adapters.google_auth import GOOGLE_SHEETS_SCOPE
 from family_spend.adapters.local import FileCredentialStore
+from family_spend.dashboard import DashboardChart, DashboardLayout, build_dashboard_layout
 from family_spend.domain.models import (
     AccountConfig,
     ApprovedImport,
@@ -72,8 +74,35 @@ class SheetsClient(Protocol):
         """Replace rows beginning at the one-based row number."""
         ...
 
+    def replace_dashboard(self, workbook_id: str, layout: DashboardLayout) -> None:
+        """Replace derived dashboard content and charts without touching ledger data."""
+        ...
+
 
 GoogleServiceBuilder = Callable[[], Any]
+_A1_RANGE = re.compile(r"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$")
+
+
+def _column_index(value: str) -> int:
+    result = 0
+    for character in value:
+        result = result * 26 + ord(character) - ord("A") + 1
+    return result - 1
+
+
+def _a1_grid_range(sheet_id: int, value: str) -> dict[str, int]:
+    """Convert one bounded A1 cell/range to a Google zero-based grid range."""
+    match = _A1_RANGE.fullmatch(value)
+    if match is None:
+        raise ValueError(f"unsupported dashboard range: {value}")
+    start_column, start_row, end_column, end_row = match.groups()
+    return {
+        "sheetId": sheet_id,
+        "startRowIndex": int(start_row) - 1,
+        "endRowIndex": int(end_row or start_row),
+        "startColumnIndex": _column_index(start_column),
+        "endColumnIndex": _column_index(end_column or start_column) + 1,
+    }
 
 
 def _authorized_sheets_service(store: FileCredentialStore) -> Any:
@@ -121,7 +150,7 @@ class GoogleApiSheetsClient:
         result = self._spreadsheets().get(
             spreadsheetId=workbook_id,
             fields=(
-                "sheets.properties(sheetId,title),"
+                "sheets(properties(sheetId,title),charts(chartId,spec.title)),"
                 "developerMetadata(metadataId,metadataKey,metadataValue)"
             ),
         ).execute()
@@ -166,6 +195,13 @@ class GoogleApiSheetsClient:
                 ]
             },
         ).execute()
+
+    def dashboard_chart_titles(self, workbook_id: str) -> tuple[str, ...]:
+        """Return native Dashboard chart titles for integration verification."""
+        sheet = self._sheet_metadata(workbook_id, "Dashboard")
+        return tuple(
+            str(chart.get("spec", {}).get("title", "")) for chart in sheet.get("charts", [])
+        )
 
     def add_worksheet(self, workbook_id: str, name: str) -> None:
         """Append one worksheet through an atomic batch update."""
@@ -244,6 +280,415 @@ class GoogleApiSheetsClient:
             valueInputOption="RAW",
             body={"majorDimension": "ROWS", "values": [list(row) for row in rows]},
         ).execute()
+
+    def replace_dashboard(self, workbook_id: str, layout: DashboardLayout) -> None:
+        """Replace the formula-driven dashboard and its native charts idempotently."""
+        sheet = self._sheet_metadata(workbook_id, "Dashboard")
+        sheet_id = int(sheet["properties"]["sheetId"])
+        escaped = "Dashboard"
+        self._spreadsheets().values().clear(
+            spreadsheetId=workbook_id,
+            range=f"'{escaped}'",
+            body={},
+        ).execute()
+        self._spreadsheets().values().update(
+            spreadsheetId=workbook_id,
+            range=f"'{escaped}'!A1",
+            valueInputOption="USER_ENTERED",
+            body={"majorDimension": "ROWS", "values": [list(row) for row in layout.rows]},
+        ).execute()
+        requests: list[dict[str, Any]] = [
+            {"deleteEmbeddedObject": {"objectId": int(chart["chartId"])}}
+            for chart in sheet.get("charts", [])
+        ]
+        requests.extend(self._dashboard_format_requests(sheet_id, layout))
+        requests.extend(self._chart_request(sheet_id, chart) for chart in layout.charts)
+        self._spreadsheets().batchUpdate(
+            spreadsheetId=workbook_id,
+            body={"requests": requests},
+        ).execute()
+
+    def _sheet_metadata(self, workbook_id: str, name: str) -> dict[str, Any]:
+        for sheet in self._metadata(workbook_id).get("sheets", []):
+            if sheet["properties"]["title"] == name:
+                return cast(dict[str, Any], sheet)
+        raise ValueError(f"worksheet not found: {name}")
+
+    @staticmethod
+    def _dashboard_format_requests(
+        sheet_id: int,
+        layout: DashboardLayout,
+    ) -> list[dict[str, Any]]:
+        column_count = max((len(row) for row in layout.rows), default=1)
+        requests: list[dict[str, Any]] = [
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": 30010,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": max(column_count, 85),
+                    },
+                    "cell": {},
+                    "fields": "userEnteredFormat,dataValidation",
+                }
+            },
+            {
+                "updateSheetProperties": {
+                    "properties": {
+                        "sheetId": sheet_id,
+                        "gridProperties": {
+                            "hideGridlines": True,
+                            "rowCount": 30010,
+                            "columnCount": max(column_count, 85),
+                        },
+                        "tabColorStyle": {"rgbColor": {"red": 0.12, "green": 0.25, "blue": 0.39}},
+                    },
+                    "fields": (
+                        "gridProperties.hideGridlines,gridProperties.rowCount,"
+                        "gridProperties.columnCount,tabColorStyle"
+                    ),
+                }
+            },
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": 30010,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": column_count,
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "verticalAlignment": "MIDDLE",
+                            "textFormat": {"fontFamily": "Arial", "fontSize": 10},
+                        }
+                    },
+                    "fields": "userEnteredFormat(verticalAlignment,textFormat)",
+                }
+            },
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "endRowIndex": 2,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": 10,
+                    },
+                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontSize": 14}}},
+                    "fields": "userEnteredFormat.textFormat",
+                }
+            },
+        ]
+        for header_range in layout.header_ranges:
+            requests.append(
+                {
+                    "repeatCell": {
+                        "range": _a1_grid_range(sheet_id, header_range),
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": {"red": 0.12, "green": 0.25, "blue": 0.39},
+                                "textFormat": {
+                                    "foregroundColor": {"red": 1, "green": 1, "blue": 1},
+                                    "bold": True,
+                                },
+                                "horizontalAlignment": "CENTER",
+                            }
+                        },
+                        "fields": "userEnteredFormat",
+                    }
+                }
+            )
+        format_ranges = (
+            ("B13:B23", "CURRENCY", "$#,##0.00;[Red]-$#,##0.00"),
+            ("A56:B30010", "DATE", "mm/dd/yy"),
+            ("K56:K30010", "CURRENCY", "$#,##0.00;[Red]-$#,##0.00"),
+            ("N56:N30010", "CURRENCY", "$#,##0.00;[Red]-$#,##0.00"),
+            ("R56:R200", "CURRENCY", "$#,##0.00;[Red]-$#,##0.00"),
+            ("T56:T200", "DATE", "mmm yyyy"),
+            ("U56:U200", "CURRENCY", "$#,##0.00;[Red]-$#,##0.00"),
+        )
+        for cell_range, number_type, pattern in format_ranges:
+            requests.append(
+                {
+                    "repeatCell": {
+                        "range": _a1_grid_range(sheet_id, cell_range),
+                        "cell": {
+                            "userEnteredFormat": {
+                                "numberFormat": {"type": number_type, "pattern": pattern}
+                            }
+                        },
+                        "fields": "userEnteredFormat.numberFormat",
+                    }
+                }
+            )
+        member_range = _a1_grid_range(sheet_id, layout.charts[2].source_range)
+        category_range = _a1_grid_range(sheet_id, layout.header_ranges[-1])
+        for data_range in (member_range, category_range):
+            first_column = data_range["startColumnIndex"]
+            requests.extend(
+                (
+                    {
+                        "repeatCell": {
+                            "range": {
+                                **data_range,
+                                "startRowIndex": 55,
+                                "endRowIndex": 200,
+                                "endColumnIndex": first_column + 1,
+                            },
+                            "cell": {
+                                "userEnteredFormat": {
+                                    "numberFormat": {
+                                        "type": "DATE",
+                                        "pattern": "mmm yyyy",
+                                    }
+                                }
+                            },
+                            "fields": "userEnteredFormat.numberFormat",
+                        }
+                    },
+                    {
+                        "repeatCell": {
+                            "range": {
+                                **data_range,
+                                "startRowIndex": 55,
+                                "endRowIndex": 200,
+                                "startColumnIndex": first_column + 1,
+                            },
+                            "cell": {
+                                "userEnteredFormat": {
+                                    "numberFormat": {
+                                        "type": "CURRENCY",
+                                        "pattern": "$#,##0.00;[Red]-$#,##0.00",
+                                    }
+                                }
+                            },
+                            "fields": "userEnteredFormat.numberFormat",
+                        }
+                    },
+                )
+            )
+        requests.extend(
+            (
+                {
+                    "setDataValidation": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 3,
+                            "endRowIndex": 5,
+                            "startColumnIndex": 1,
+                            "endColumnIndex": 2,
+                        },
+                        "rule": {
+                            "condition": {"type": "DATE_IS_VALID"},
+                            "strict": True,
+                            "showCustomUi": True,
+                        },
+                    }
+                },
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 3,
+                            "endRowIndex": 9,
+                            "startColumnIndex": 1,
+                            "endColumnIndex": 2,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": {"red": 1.0, "green": 0.95, "blue": 0.75}
+                            }
+                        },
+                        "fields": "userEnteredFormat.backgroundColor",
+                    }
+                },
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 3,
+                            "endRowIndex": 5,
+                            "startColumnIndex": 3,
+                            "endColumnIndex": 11,
+                        },
+                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+                        "fields": "userEnteredFormat.textFormat.bold",
+                    }
+                },
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 3,
+                            "endRowIndex": 5,
+                            "startColumnIndex": 3,
+                            "endColumnIndex": 7,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "numberFormat": {
+                                    "type": "CURRENCY",
+                                    "pattern": "$#,##0.00;[Red]-$#,##0.00",
+                                }
+                            }
+                        },
+                        "fields": "userEnteredFormat.numberFormat",
+                    }
+                },
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 3,
+                            "endRowIndex": 5,
+                            "startColumnIndex": 1,
+                            "endColumnIndex": 2,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "numberFormat": {"type": "DATE", "pattern": "mm/dd/yy"}
+                            }
+                        },
+                        "fields": "userEnteredFormat.numberFormat",
+                    }
+                },
+                {
+                    "autoResizeDimensions": {
+                        "dimensions": {
+                            "sheetId": sheet_id,
+                            "dimension": "COLUMNS",
+                            "startIndex": 0,
+                            "endIndex": column_count,
+                        }
+                    }
+                },
+            )
+        )
+        for validation in layout.validations:
+            cell = _a1_grid_range(sheet_id, validation.cell)
+            requests.append(
+                {
+                    "setDataValidation": {
+                        "range": cell,
+                        "rule": {
+                            "condition": {
+                                "type": "ONE_OF_RANGE",
+                                "values": [
+                                    {"userEnteredValue": f"=Dashboard!{validation.source_range}"}
+                                ],
+                            },
+                            "strict": True,
+                            "showCustomUi": True,
+                        },
+                    }
+                }
+            )
+        validation_ranges = [
+            _a1_grid_range(sheet_id, validation.source_range.split(":", 1)[0])
+            for validation in layout.validations
+        ]
+        if validation_ranges:
+            requests.append(
+                {
+                    "updateDimensionProperties": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "dimension": "COLUMNS",
+                            "startIndex": min(
+                                item["startColumnIndex"] for item in validation_ranges
+                            ),
+                            "endIndex": max(item["endColumnIndex"] for item in validation_ranges),
+                        },
+                        "properties": {"hiddenByUser": True},
+                        "fields": "hiddenByUser",
+                    }
+                }
+            )
+        return requests
+
+    @staticmethod
+    def _chart_request(sheet_id: int, chart: DashboardChart) -> dict[str, Any]:
+        source = _a1_grid_range(sheet_id, chart.source_range)
+        domain = {**source, "endColumnIndex": source["startColumnIndex"] + 1}
+        series = []
+        palette = (
+            (0.18, 0.49, 0.72),
+            (0.96, 0.55, 0.15),
+            (0.24, 0.64, 0.45),
+            (0.55, 0.38, 0.67),
+            (0.80, 0.35, 0.36),
+            (0.40, 0.69, 0.75),
+            (0.65, 0.56, 0.34),
+            (0.45, 0.45, 0.45),
+        )
+        for offset in range(chart.series_count):
+            column = source["startColumnIndex"] + offset + 1
+            red, green, blue = palette[offset % len(palette)]
+            series.append(
+                {
+                    "series": {
+                        "sourceRange": {
+                            "sources": [
+                                {**source, "startColumnIndex": column, "endColumnIndex": column + 1}
+                            ]
+                        }
+                    },
+                    "targetAxis": ("BOTTOM_AXIS" if chart.chart_type == "BAR" else "LEFT_AXIS"),
+                    "colorStyle": {"rgbColor": {"red": red, "green": green, "blue": blue}},
+                }
+            )
+        return {
+            "addChart": {
+                "chart": {
+                    "spec": {
+                        "title": chart.title,
+                        "basicChart": {
+                            "chartType": chart.chart_type,
+                            "legendPosition": "TOP_LEGEND"
+                            if chart.series_count > 1
+                            else "NO_LEGEND",
+                            "headerCount": 1,
+                            "axis": (
+                                [
+                                    {
+                                        "position": "BOTTOM_AXIS",
+                                        "title": "Net spend (USD)",
+                                    },
+                                    {"position": "LEFT_AXIS"},
+                                ]
+                                if chart.chart_type == "BAR"
+                                else [
+                                    {"position": "BOTTOM_AXIS"},
+                                    {
+                                        "position": "LEFT_AXIS",
+                                        "title": "Net spend (USD)",
+                                    },
+                                ]
+                            ),
+                            "domains": [{"domain": {"sourceRange": {"sources": [domain]}}}],
+                            "series": series,
+                        },
+                    },
+                    "position": {
+                        "overlayPosition": {
+                            "anchorCell": {
+                                "sheetId": sheet_id,
+                                "rowIndex": chart.anchor_row - 1,
+                                "columnIndex": chart.anchor_column - 1,
+                            },
+                            "offsetXPixels": 0,
+                            "offsetYPixels": 0,
+                            "widthPixels": chart.width,
+                            "heightPixels": chart.height,
+                        }
+                    },
+                }
+            }
+        }
 
 
 def _as_bool(value: object, *, location: str) -> bool:
@@ -662,6 +1107,18 @@ class GoogleWorkbookGateway:
                 3,
                 seeded_category_rows,
             )
+        self.provision_dashboard()
+
+    def provision_dashboard(self) -> None:
+        """Replace derived formulas, controls, formatting, and charts idempotently."""
+        configuration = self._load_configuration()
+        self._client.replace_dashboard(
+            self.workbook_id,
+            build_dashboard_layout(
+                member_count=sum(member.active for member in configuration.members),
+                category_count=sum(category.active for category in configuration.categories),
+            ),
+        )
 
     def validate_schema(self) -> None:
         """Reject missing, renamed, reordered, or type-incompatible workbook data."""

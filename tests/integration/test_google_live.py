@@ -27,10 +27,19 @@ class LiveGoogleWorkbookIntegrationTests(unittest.TestCase):
 
         gateway.validate_schema()
         configuration = gateway.load_configuration()
+        gateway.provision_dashboard()
 
         self.assertIn(
             "Pets",
             tuple(category.display_name for category in configuration.categories),
+        )
+        self.assertEqual(
+            (
+                "Net spending by category",
+                "Monthly net spending",
+                "Member spending by month",
+            ),
+            GoogleApiSheetsClient(credential_store).dashboard_chart_titles(str(WORKBOOK_ID)),
         )
 
 

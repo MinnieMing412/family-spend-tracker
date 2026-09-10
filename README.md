@@ -123,6 +123,18 @@ family-spend import /path/to/statement.pdf --retain-cache
 The completion message includes the retained cache ID. `family-spend status`
 shows the configured cache directory.
 
+## Dashboard
+
+Setup provisions an idempotent, formula-driven Google Sheets Dashboard. It
+defaults to the trailing 12 months and provides date, member, institution,
+account, and category controls. Summary cards, category and monthly charts,
+member comparison, category-by-month values, and top merchants all derive from
+approved transaction rows and update after direct ledger edits.
+
+Main spend includes purchases, merchant credits, fees, and flagged cash advances.
+It excludes payments, transfers, rewards, interest, and other activity. Refunds
+remain negative and may produce a negative category total.
+
 ## Project documents
 
 - [Product requirements](docs/PRD.md)
@@ -136,6 +148,7 @@ shows the configured cache directory.
 - [Phase 5A Bank of America parser architecture](docs/architecture/phase-5a-bank-of-america-parser.md)
 - [Phase 5B Chase parser architecture](docs/architecture/phase-5b-chase-parser.md)
 - [Phase 6 backfill architecture](docs/architecture/phase-6-backfill.md)
+- [Phase 7 dashboard architecture](docs/architecture/phase-7-dashboard.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy
