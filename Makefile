@@ -3,9 +3,9 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 MYPY := .venv/bin/mypy
 
-.PHONY: check test lint typecheck
+.PHONY: check test lint typecheck privacy
 
-check: test lint typecheck
+check: test lint typecheck privacy
 
 test:
 	$(PYTEST) -q
@@ -16,3 +16,6 @@ lint:
 typecheck:
 	$(MYPY) src tests
 	$(PYTHON) -m compileall -q src tests
+
+privacy:
+	$(PYTHON) -m family_spend.release_checks .

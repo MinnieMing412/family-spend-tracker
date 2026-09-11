@@ -75,6 +75,8 @@ class DashboardLayout:
     charts: tuple[DashboardChart, ...]
     validations: tuple[DashboardValidation, ...]
     header_ranges: tuple[str, ...] = ()
+    member_month_support_range: str = ""
+    category_month_support_range: str = ""
 
 
 def _month_start(value: date) -> date:
@@ -404,5 +406,9 @@ def build_dashboard_layout(*, member_count: int = 8, category_count: int = 19) -
             "T55:U55",
             f"W55:{_column_name(member_end_column)}55",
             (f"{_column_name(category_start_column)}55:{_column_name(category_end_column)}55"),
+        ),
+        member_month_support_range=f"W55:{_column_name(member_end_column)}200",
+        category_month_support_range=(
+            f"{_column_name(category_start_column)}55:{_column_name(category_end_column)}200"
         ),
     )

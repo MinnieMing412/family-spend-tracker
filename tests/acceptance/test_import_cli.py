@@ -18,7 +18,8 @@ from family_spend.adapters.memory import (
 )
 from family_spend.application import FamilySpendApplication
 from family_spend.cli import main
-from family_spend.domain.models import LocalSettings
+from family_spend.domain.models import LocalSettings, ReviewState, StructuredCacheRecord
+from family_spend.ports import ReviewPort
 from family_spend.review import ReviewEngine
 from tests.import_helpers import (
     ApprovingReviewer,
@@ -33,7 +34,7 @@ class SingleImportCliAcceptanceTests(unittest.TestCase):
     def _application(
         self,
         workbook: InMemoryWorkbookGateway,
-        reviewer: ApprovingReviewer | CancellingReviewer,
+        reviewer: ReviewPort,
         cache: InMemoryStructuredCache | FileStructuredCache,
         engine: ReviewEngine,
     ) -> FamilySpendApplication:
@@ -149,6 +150,137 @@ class SingleImportCliAcceptanceTests(unittest.TestCase):
             (),
             workbook.transactions_in_window("ending-10005", date.min, date.max),
         )
+
+    def test_review_failure_is_actionable_and_cleans_temporary_cache(self) -> None:
+        class FailingReviewer:
+            def review(self, state: ReviewState) -> ReviewState:
+                del state
+                raise RuntimeError("terminal renderer exposed private details")
+
+        engine = ReviewEngine()
+        workbook = InMemoryWorkbookGateway(workbook_configuration())
+        cache = InMemoryStructuredCache()
+        application = self._application(workbook, FailingReviewer(), cache, engine)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "statement.pdf"
+            write_statement(path)
+            statement_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+            result = self._run(application, path)
+
+        self.assertEqual(1, result[0])
+        self.assertEqual("", result[1])
+        self.assertIn("Review failed before upload", result[2])
+        self.assertIn("retry", result[2])
+        self.assertNotIn("private details", result[2])
+        self.assertIsNone(cache.load(f"cache-{statement_hash[:20]}"))
+        self.assertIsNone(workbook.find_import_by_hash(statement_hash))
+
+    def test_keyboard_interruption_cleans_temporary_cache_and_uploads_nothing(self) -> None:
+        class InterruptingReviewer:
+            def review(self, state: ReviewState) -> ReviewState:
+                del state
+                raise KeyboardInterrupt
+
+        engine = ReviewEngine()
+        workbook = InMemoryWorkbookGateway(workbook_configuration())
+        cache = InMemoryStructuredCache()
+        application = self._application(workbook, InterruptingReviewer(), cache, engine)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "statement.pdf"
+            write_statement(path)
+            statement_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+            with self.assertRaises(KeyboardInterrupt):
+                application.import_statement(path)
+
+        self.assertIsNone(cache.load(f"cache-{statement_hash[:20]}"))
+        self.assertIsNone(workbook.find_import_by_hash(statement_hash))
+
+    def test_partial_workbook_failure_is_actionable_retry_safe_and_cleans_cache(self) -> None:
+        engine = ReviewEngine()
+        workbook = InMemoryWorkbookGateway(workbook_configuration())
+        workbook.fail_next_commit_at("after_transactions")
+        cache = InMemoryStructuredCache()
+        application = self._application(
+            workbook,
+            ApprovingReviewer(engine),
+            cache,
+            engine,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "statement.pdf"
+            write_statement(path)
+            statement_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+            failed = self._run(application, path)
+            retried = self._run(application, path)
+
+        self.assertEqual(1, failed[0])
+        self.assertIn("after transaction rows may have been written", failed[2])
+        self.assertIn("Retry the same statement", failed[2])
+        self.assertEqual((0, ""), (retried[0], retried[2]))
+        self.assertIn("import complete", retried[1])
+        self.assertIsNone(cache.load(f"cache-{statement_hash[:20]}"))
+        self.assertEqual(
+            8,
+            len(workbook.transactions_in_window("ending-10005", date.min, date.max)),
+        )
+
+    def test_cache_write_failure_is_actionable_and_uploads_nothing(self) -> None:
+        class FailingCache(InMemoryStructuredCache):
+            def save(self, record: StructuredCacheRecord) -> None:
+                del record
+                raise OSError("private directory exposed")
+
+        engine = ReviewEngine()
+        workbook = InMemoryWorkbookGateway(workbook_configuration())
+        application = self._application(
+            workbook,
+            ApprovingReviewer(engine),
+            FailingCache(),
+            engine,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "statement.pdf"
+            write_statement(path)
+            statement_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+            result = self._run(application, path)
+
+        self.assertEqual(1, result[0])
+        self.assertIn("nothing was uploaded", result[2])
+        self.assertIn("permissions", result[2])
+        self.assertNotIn("directory exposed", result[2])
+        self.assertIsNone(workbook.find_import_by_hash(statement_hash))
+
+    def test_cache_cleanup_failure_names_safe_manual_recovery(self) -> None:
+        class FailingCleanupCache(InMemoryStructuredCache):
+            def delete(self, cache_id: str) -> None:
+                del cache_id
+                raise OSError("private directory exposed")
+
+        engine = ReviewEngine()
+        workbook = InMemoryWorkbookGateway(workbook_configuration())
+        application = self._application(
+            workbook,
+            ApprovingReviewer(engine),
+            FailingCleanupCache(),
+            engine,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "statement.pdf"
+            write_statement(path)
+            statement_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+            result = self._run(application, path)
+
+        self.assertEqual(1, result[0])
+        self.assertIn("Temporary cache cleanup failed", result[2])
+        self.assertIn("family-spend status", result[2])
+        self.assertIn("retry", result[2])
+        self.assertNotIn("directory exposed", result[2])
+        self.assertIsNotNone(workbook.find_import_by_hash(statement_hash))
 
     def test_retained_cache_is_private_structured_and_contains_no_pdf_text(self) -> None:
         engine = ReviewEngine()
