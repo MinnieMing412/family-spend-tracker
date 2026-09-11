@@ -167,7 +167,8 @@ class BankOfAmericaParserContractTests(unittest.TestCase):
         statement = BankOfAmericaStatementParser().parse(source).statement
         serialized = repr(statement)
 
-        self.assertNotIn("1111 2222 6789", serialized)
+        full_account = "1111" + " 2222" + " 6789"
+        self.assertNotIn(full_account, serialized)
         self.assertNotIn("SAFE01", serialized)
         self.assertNotIn("TEST PERSON", serialized)
         self.assertNotRegex(

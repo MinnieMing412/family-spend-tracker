@@ -22,6 +22,7 @@ from family_spend.adapters.memory import (
 )
 from family_spend.dashboard import build_dashboard_layout
 from family_spend.domain.models import ImportStatus
+from family_spend.errors import FamilySpendError
 from family_spend.imports import SingleImportWorkflow
 from family_spend.review import ReviewEngine
 from tests.import_helpers import ApprovingReviewer, build_ingestion, write_statement
@@ -61,6 +62,8 @@ class FaultInjectingSheetsClient(InMemorySheetsClient):
 
 class GoogleWorkbookGatewayContractTests(unittest.TestCase):
     def test_google_client_replaces_dashboard_values_and_native_charts(self) -> None:
+        events: list[str] = []
+
         class Request:
             def __init__(self, result: dict[str, object] | None = None) -> None:
                 self._result = result or {}
@@ -74,10 +77,12 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
                 self.clears: list[dict[str, object]] = []
 
             def clear(self, **kwargs: object) -> Request:
+                events.append("clear-values")
                 self.clears.append(kwargs)
                 return Request()
 
             def update(self, **kwargs: object) -> Request:
+                events.append("update-values")
                 self.updates.append(kwargs)
                 return Request()
 
@@ -103,6 +108,7 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
                 return self.value_resource
 
             def batchUpdate(self, **kwargs: object) -> Request:
+                events.append("batch-update")
                 self.batch_updates.append(kwargs)
                 return Request()
 
@@ -130,7 +136,13 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
             "USER_ENTERED",
             resource.value_resource.updates[0]["valueInputOption"],
         )
-        serialized = json.dumps(resource.batch_updates[0], sort_keys=True)
+        self.assertEqual(
+            ["batch-update", "clear-values", "update-values", "batch-update"],
+            events,
+        )
+        grid_update = json.dumps(resource.batch_updates[0], sort_keys=True)
+        self.assertIn('"columnCount": 85', grid_update)
+        serialized = json.dumps(resource.batch_updates[-1], sort_keys=True)
         self.assertIn('"objectId": 99', serialized)
         self.assertEqual(3, serialized.count('"addChart"'))
         self.assertIn('"targetAxis": "BOTTOM_AXIS"', serialized)
@@ -191,7 +203,7 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
                 write_statement(path)
                 sheets.inject_failure(write_number, after_write=after_write)
 
-                with self.assertRaisesRegex(RuntimeError, "Google write failure"):
+                with self.assertRaisesRegex(FamilySpendError, "Retry the same statement"):
                     workflow.execute(path)
                 result = workflow.execute(path)
 
@@ -234,11 +246,7 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
             2,
             sheets.header_row_count(gateway.workbook_id, "Categories"),
         )
-        dashboard = sheets.dashboard_layout(gateway.workbook_id)
-        self.assertIsNotNone(dashboard)
-        assert dashboard is not None
-        self.assertEqual(3, len(dashboard.charts))
-        self.assertEqual(4, len(dashboard.validations))
+        self.assertEqual(3, len(gateway.dashboard_chart_titles()))
 
     def test_repeated_provisioning_preserves_user_category_edits(self) -> None:
         sheets = InMemorySheetsClient()

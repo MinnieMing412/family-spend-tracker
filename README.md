@@ -23,6 +23,9 @@ The current command surface is available with:
 .venv/bin/family-spend --help
 ```
 
+For household installation, workbook configuration, recovery, cache deletion,
+and uninstall instructions, use the [operations guide](docs/operations.md).
+
 ## Connect Google Sheets
 
 Before the first setup:
@@ -149,6 +152,9 @@ remain negative and may produce a negative category total.
 - [Phase 5B Chase parser architecture](docs/architecture/phase-5b-chase-parser.md)
 - [Phase 6 backfill architecture](docs/architecture/phase-6-backfill.md)
 - [Phase 7 dashboard architecture](docs/architecture/phase-7-dashboard.md)
+- [Phase 8 release-hardening architecture](docs/architecture/phase-8-release-hardening.md)
+- [Operations guide](docs/operations.md)
+- [v1 release checklist](docs/release-checklist.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy

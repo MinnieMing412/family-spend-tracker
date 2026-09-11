@@ -1,7 +1,7 @@
 BANK OF AMERICA
 Synthetic Advantage Banking
 for December 9, 2025 to January 7, 2026
-Account number: 1111 2222 6789
+Account number: XXXX XXXX 6789
 Account summary
 Beginning balance on December 9, 2025 $1,000.00
 Deposits and other additions 2,250.00

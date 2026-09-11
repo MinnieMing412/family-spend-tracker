@@ -172,6 +172,12 @@ class InMemoryWorkbookGateway:
         """Expose the simulated dashboard for boundary-state assertions."""
         return self._dashboard_layout
 
+    def dashboard_chart_titles(self) -> tuple[str, ...]:
+        """Return simulated native dashboard chart titles."""
+        if self._dashboard_layout is None:
+            return ()
+        return tuple(chart.title for chart in self._dashboard_layout.charts)
+
     def worksheet_names(self) -> tuple[str, ...]:
         """Return worksheet names in their provisioned order."""
         return self._worksheets
@@ -454,6 +460,13 @@ class InMemorySheetsClient:
             raise ValueError(f"workbook not found: {workbook_id}")
         layout = workbook["dashboard_layout"]
         return layout if isinstance(layout, DashboardLayout) else None
+
+    def dashboard_chart_titles(self, workbook_id: str) -> tuple[str, ...]:
+        """Return simulated native dashboard chart titles."""
+        layout = self.dashboard_layout(workbook_id)
+        if layout is None:
+            return ()
+        return tuple(chart.title for chart in layout.charts)
 
     def header_row_count(self, workbook_id: str, worksheet: str) -> int:
         """Return the two schema header rows when both are populated."""

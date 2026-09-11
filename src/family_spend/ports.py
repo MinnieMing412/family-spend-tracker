@@ -124,6 +124,10 @@ class WorkbookConnection(Protocol):
         """Idempotently create or refresh derived dashboard structures."""
         ...
 
+    def dashboard_chart_titles(self) -> tuple[str, ...]:
+        """Return the provisioned native dashboard chart titles."""
+        ...
+
     def validate_schema(self) -> None:
         """Raise an error when required sheets or columns are missing."""
         ...

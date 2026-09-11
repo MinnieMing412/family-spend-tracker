@@ -36,15 +36,19 @@ class BackfillOutcome:
     rejected: int = 0
     unresolved: int = 0
     complete: bool = True
+    item_summaries: tuple[str, ...] = ()
 
     def summary(self) -> str:
         status = "complete" if self.complete else "incomplete"
-        return (
+        counts = (
             f"Backfill {status}. Discovered: {self.discovered}; "
             f"imported: {self.imported}; duplicates: {self.duplicates}; "
             f"skipped: {self.skipped}; rejected: {self.rejected}; "
             f"unresolved: {self.unresolved}."
         )
+        if not self.item_summaries:
+            return counts
+        return "\n".join((counts, "Files:", *self.item_summaries))
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +107,13 @@ class BackfillWorkflow:
         relative_paths = tuple(path.relative_to(root).as_posix() for path in paths)
         if not self._backfill_reviewer.confirm_plan(relative_paths):
             return BackfillOutcome(
-                discovered=len(paths), skipped=len(paths), complete=False
+                discovered=len(paths),
+                skipped=len(paths),
+                complete=False,
+                item_summaries=tuple(
+                    f"- {relative_path}: skipped; next: rerun backfill when ready."
+                    for relative_path in relative_paths
+                ),
             )
 
         root_id = hashlib.sha256(str(root).encode()).hexdigest()
@@ -148,33 +158,65 @@ class BackfillWorkflow:
         )
         if clean_states and not self._backfill_reviewer.approve_clean(clean_states):
             self._save_checkpoint(root_id, plan_hash, completed_hints, failed_names)
+            clean_paths = tuple(
+                item.relative_path
+                for item in plan
+                if item.prepared is not None and item.prepared.state.is_clean
+            )
             return BackfillOutcome(
-                discovered=len(paths), unresolved=len(clean_states), complete=False
+                discovered=len(paths),
+                unresolved=len(clean_states),
+                complete=False,
+                item_summaries=tuple(
+                    f"- {relative_path}: unresolved; next: rerun with --resume and approve or "
+                    "review the clean statement."
+                    for relative_path in clean_paths
+                ),
             )
         approved_clean_hashes = {
             state.statement.source_hash for state in clean_states
         }
 
         imported = duplicates = skipped = rejected = unresolved = 0
+        item_summaries: list[str] = []
         clean_reviewer = _ApprovedCleanReviewer(self._review_engine)
         for item in plan:
             if item.prepared is None:
                 if item.relative_path in failed_names:
                     rejected += 1
+                    item_summaries.append(
+                        f"- {item.relative_path}: rejected; next: replace the PDF and rerun with "
+                        "--resume."
+                    )
                     continue
                 if self._backfill_reviewer.skip_rejected(
                     item.path.name, item.error or "statement could not be parsed"
                 ):
                     rejected += 1
                     failed_names.add(item.relative_path)
+                    item_summaries.append(
+                        f"- {item.relative_path}: rejected; next: replace the PDF and rerun with "
+                        "--resume."
+                    )
                     self._save_checkpoint(
                         root_id, plan_hash, completed_hints, failed_names
                     )
                     continue
                 unresolved += 1
+                item_summaries.append(
+                    f"- {item.relative_path}: unresolved; next: replace the PDF or explicitly "
+                    "skip it, then rerun with --resume."
+                )
                 self._save_checkpoint(root_id, plan_hash, completed_hints, failed_names)
                 return BackfillOutcome(
-                    len(paths), imported, duplicates, skipped, rejected, unresolved, False
+                    len(paths),
+                    imported,
+                    duplicates,
+                    skipped,
+                    rejected,
+                    unresolved,
+                    False,
+                    tuple(item_summaries),
                 )
 
             preview_hash = item.prepared.state.statement.source_hash
@@ -182,6 +224,9 @@ class BackfillWorkflow:
                 authoritative = self._workbook.find_import_by_hash(preview_hash)
                 if authoritative is not None and authoritative.status is ImportStatus.COMPLETE:
                     duplicates += 1
+                    item_summaries.append(
+                        f"- {item.relative_path}: duplicate; next: none."
+                    )
                     continue
             try:
                 workflow = self._single_workflow()
@@ -200,26 +245,56 @@ class BackfillWorkflow:
                 )
             except Exception:
                 unresolved += 1
+                item_summaries.append(
+                    f"- {item.relative_path}: unresolved; next: retry the same backfill with "
+                    "--resume."
+                )
                 self._save_checkpoint(root_id, plan_hash, completed_hints, failed_names)
                 return BackfillOutcome(
-                    len(paths), imported, duplicates, skipped, rejected, unresolved, False
+                    len(paths),
+                    imported,
+                    duplicates,
+                    skipped,
+                    rejected,
+                    unresolved,
+                    False,
+                    tuple(item_summaries),
                 )
 
             if outcome.disposition == "duplicate_statement":
                 duplicates += 1
                 completed_hints.add(source_hash)
+                item_summaries.append(
+                    f"- {item.relative_path}: duplicate; next: none."
+                )
             elif outcome.disposition == "cancelled":
                 skipped += 1
+                item_summaries.append(
+                    f"- {item.relative_path}: skipped; next: rerun with --resume to review it."
+                )
             elif outcome.status is ImportStatus.COMPLETE:
                 imported += 1
                 completed_hints.add(source_hash)
+                item_summaries.append(
+                    f"- {item.relative_path}: imported; next: none."
+                )
             else:
                 unresolved += 1
+                item_summaries.append(
+                    f"- {item.relative_path}: unresolved; next: rerun with --resume."
+                )
             self._save_checkpoint(root_id, plan_hash, completed_hints, failed_names)
 
         self._checkpoints.delete(root_id)
         return BackfillOutcome(
-            len(paths), imported, duplicates, skipped, rejected, unresolved, not unresolved
+            len(paths),
+            imported,
+            duplicates,
+            skipped,
+            rejected,
+            unresolved,
+            not unresolved,
+            tuple(item_summaries),
         )
 
     def _single_workflow(self) -> SingleImportWorkflow:

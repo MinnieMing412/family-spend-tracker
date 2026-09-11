@@ -20,6 +20,7 @@ from family_spend.domain.models import (
     StructuredCacheRecord,
     WorkbookConfig,
 )
+from family_spend.errors import FamilySpendError
 from family_spend.ingestion import StatementIngestionService
 from family_spend.ports import Clock, ReviewPort, StructuredCache, WorkbookGateway
 from family_spend.review import ReviewEngine, normalize_merchant
@@ -203,6 +204,8 @@ class SingleImportWorkflow:
         cache_id = prepared.cache_id
         existing = prepared.existing_import
         if existing is not None and existing.status is ImportStatus.COMPLETE:
+            if not retain_cache:
+                self._delete_cache(cache_id)
             return SingleImportOutcome(
                 ImportStatus.SKIPPED,
                 "Statement was already imported; workbook state is unchanged.",
@@ -212,11 +215,25 @@ class SingleImportWorkflow:
                 disposition="duplicate_statement",
             )
         try:
-            self._cache.save(self._cache_record(cache_id, initial, stage="pending_review"))
-            decision = (reviewer or self._reviewer).review(initial)
+            self._save_cache(
+                self._cache_record(cache_id, initial, stage="pending_review"),
+                after_upload=False,
+            )
+            try:
+                decision = (reviewer or self._reviewer).review(initial)
+            except FamilySpendError:
+                raise
+            except Exception as error:
+                raise FamilySpendError(
+                    "Review failed before upload. Correct the review input and retry the same "
+                    "statement; no transaction rows were uploaded."
+                ) from error
             if decision.statement.statement_id != initial.statement.statement_id:
                 raise ValueError("review decision does not belong to the parsed statement")
-            self._cache.save(self._cache_record(cache_id, decision, stage="reviewed"))
+            self._save_cache(
+                self._cache_record(cache_id, decision, stage="reviewed"),
+                after_upload=False,
+            )
             if decision.status is ReviewStatus.CANCELLED:
                 return SingleImportOutcome(
                     ImportStatus.SKIPPED,
@@ -261,13 +278,19 @@ class SingleImportWorkflow:
                 reviewed_at=reviewed_at,
                 merchant_rules=rules,
             )
-            result = self._workbook.commit_import(approved)
-            self._cache.save(
+            try:
+                result = self._workbook.commit_import(approved)
+            except FamilySpendError:
+                raise
+            except Exception as error:
+                raise self._workbook_failure(initial.statement.source_hash) from error
+            self._save_cache(
                 self._cache_record(
                     cache_id,
                     decision,
                     stage=f"commit_{result.status.value}",
-                )
+                ),
+                after_upload=True,
             )
             return SingleImportOutcome(
                 result.status,
@@ -282,7 +305,49 @@ class SingleImportWorkflow:
             )
         finally:
             if not retain_cache:
-                self._cache.delete(cache_id)
+                self._delete_cache(cache_id)
+
+    def _delete_cache(self, cache_id: str) -> None:
+        try:
+            self._cache.delete(cache_id)
+        except Exception as error:
+            raise FamilySpendError(
+                f"Temporary cache cleanup failed for {cache_id}. Run `family-spend status` to "
+                "locate the cache directory, delete that file, and retry the same statement "
+                "safely."
+            ) from error
+
+    def _save_cache(self, record: StructuredCacheRecord, *, after_upload: bool) -> None:
+        try:
+            self._cache.save(record)
+        except Exception as error:
+            if after_upload:
+                message = (
+                    "The workbook import may have completed, but its private cache update failed. "
+                    "Retry the same statement to confirm completion without creating duplicates."
+                )
+            else:
+                message = (
+                    "Private temporary cache could not be written, so nothing was uploaded. "
+                    "Check the application-directory permissions and retry the same statement."
+                )
+            raise FamilySpendError(message) from error
+
+    def _workbook_failure(self, statement_hash: str) -> FamilySpendError:
+        """Describe a failed commit without exposing provider error details."""
+        try:
+            existing = self._workbook.find_import_by_hash(statement_hash)
+        except Exception:
+            existing = None
+        if existing is not None and existing.transaction_ids:
+            return FamilySpendError(
+                "Workbook write was interrupted after transaction rows may have been written. "
+                "Retry the same statement to finish safely without creating duplicates."
+            )
+        return FamilySpendError(
+            "Workbook write failed before any transaction rows were confirmed. Retry the same "
+            "statement; the idempotent import will not create duplicates."
+        )
 
     @staticmethod
     def _cache_record(

@@ -39,7 +39,7 @@ class LiveGoogleWorkbookIntegrationTests(unittest.TestCase):
                 "Monthly net spending",
                 "Member spending by month",
             ),
-            GoogleApiSheetsClient(credential_store).dashboard_chart_titles(str(WORKBOOK_ID)),
+            gateway.dashboard_chart_titles(),
         )
 
 

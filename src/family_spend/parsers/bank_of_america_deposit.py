@@ -29,7 +29,7 @@ _PERIOD = re.compile(
     re.IGNORECASE,
 )
 _ACCOUNT = re.compile(
-    r"Account\s+number\s*:\s*(?P<value>\d{4}(?:\s+\d{4}){1,3})\b",
+    r"Account\s+number\s*:\s*(?P<value>(?:X{4}|\d{4})(?:\s+(?:X{4}|\d{4})){1,3})\b",
     re.IGNORECASE,
 )
 _ROW_START = re.compile(rf"(?P<date>{_NUMERIC_DATE})", re.IGNORECASE)

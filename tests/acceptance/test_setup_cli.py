@@ -48,7 +48,7 @@ class SetupCliAcceptanceTests(unittest.TestCase):
         self.assertTrue(credentials.contains(saved.credential_reference))
         workbook = workbooks.connect(saved.workbook_id)
         workbook.validate_schema()
-        self.assertIsNotNone(workbook.dashboard_layout)
+        self.assertEqual(3, len(workbook.dashboard_chart_titles()))
         self.assertEqual(
             (
                 "Transactions",
@@ -96,7 +96,7 @@ class SetupCliAcceptanceTests(unittest.TestCase):
         self.assertIsNotNone(saved)
         assert saved is not None
         self.assertEqual(existing.workbook_id, saved.workbook_id)
-        self.assertIsNotNone(existing.dashboard_layout)
+        self.assertEqual(3, len(existing.dashboard_chart_titles()))
         self.assertIn(existing.workbook_id, stdout.getvalue())
 
     def test_validate_workbook_reports_a_compatible_connection(self) -> None:

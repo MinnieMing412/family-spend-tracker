@@ -54,6 +54,7 @@ def build_application() -> FamilySpendApplication:
                     ),
                     parser=amex_parser,
                     minimum_markers=2,
+                    identity_markers=("American Express",),
                 ),
                 ParserRegistration(
                     institution=Institution.BANK_OF_AMERICA,
@@ -65,6 +66,7 @@ def build_application() -> FamilySpendApplication:
                     ),
                     parser=bank_of_america_parser,
                     minimum_markers=2,
+                    identity_markers=("Bank of America",),
                 ),
                 ParserRegistration(
                     institution=Institution.CHASE,
@@ -76,6 +78,7 @@ def build_application() -> FamilySpendApplication:
                     ),
                     parser=chase_parser,
                     minimum_markers=2,
+                    identity_markers=("CHASE",),
                 ),
             )
         ),

@@ -40,18 +40,23 @@ def _write_private_json(path: Path, value: dict[str, Any]) -> None:
     """Atomically write JSON readable and writable only by the current user."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     path.parent.chmod(0o700)
-    with NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        delete=False,
-    ) as temporary:
-        json.dump(value, temporary, indent=2, sort_keys=True)
-        temporary.write("\n")
-        temporary_path = Path(temporary.name)
-    temporary_path.chmod(0o600)
-    temporary_path.replace(path)
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            json.dump(value, temporary, indent=2, sort_keys=True)
+            temporary.write("\n")
+        temporary_path.chmod(0o600)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 class FileSettingsStore:
