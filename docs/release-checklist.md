@@ -45,11 +45,19 @@ Additional May samples validated on 2026-09-21 without uploading or copying:
   environment using [`docs/operations.md`](operations.md).
 - [ ] Run one reviewed local sample per institution and verify member assignment,
   category decisions, section totals, and the final import record.
-- [ ] Configure a disposable Google workbook and run the opt-in integration test.
-- [ ] Complete every Dashboard visual check in
+- [x] Configure a disposable Google workbook and run the opt-in integration test.
+- [x] Complete every Dashboard visual check in
   [`docs/architecture/phase-7-dashboard.md`](architecture/phase-7-dashboard.md).
-- [ ] Confirm a second Dashboard provisioning leaves exactly three charts and one
+- [x] Confirm a second Dashboard provisioning leaves exactly three charts and one
   set of controls.
+
+Dashboard validation completed on 2026-09-21 with synthetic QA-only rows. The
+live test covered every transaction type, an unapproved row, a refund exceeding
+its category purchases, all five controls, direct edits to amount, category,
+merchant, member, and type, chart-support recalculation, and idempotent
+reprovisioning. Manual Chrome review confirmed descending category bars,
+chronological months, labeled member series, negative values, and non-overlapping
+charts and support data.
 
 Do not call the release accepted until every unchecked item above is completed
 by the household administrator.
