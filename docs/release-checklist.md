@@ -28,6 +28,17 @@ Validated on 2026-09-10 without uploading or copying source files:
   rejected as scanned. Obtain a text-bearing AMEX PDF for parser/reconciliation
   acceptance; OCR is outside v1 scope.
 
+Additional May samples validated on 2026-09-21 without uploading or copying:
+
+- [x] Bank of America text PDF: 12 transactions, masked account output, and
+  matched reconciliation across 3 lines.
+- [x] Chase text PDF ending 9174: 6 transactions, masked account output, and
+  matched reconciliation across 6 lines.
+- [x] Chase text PDF ending 7466: 40 transactions, masked account output, and
+  matched reconciliation across 6 lines.
+- [ ] The May AMEX PDF is also image-only and is correctly rejected as scanned;
+  a text-bearing AMEX export is still required.
+
 ## Manual environment and UI
 
 - [ ] Complete install, `--help`, disconnect, and uninstall in a clean macOS user
