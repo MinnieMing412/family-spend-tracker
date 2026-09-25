@@ -35,7 +35,7 @@ class TerminalReviewPort:
         exceptions_only = False
         override_reason: str | None = None
         self._write("Commands: approve, cancel, filter all|exceptions, edit, bulk-category,")
-        self._write("          save-rule, resolve-duplicate, override, help")
+        self._write("          bulk-merchant, save-rule, resolve-duplicate, override, help")
         while True:
             self._render(current, exceptions_only=exceptions_only)
             self._output.write("review> ")
@@ -71,6 +71,27 @@ class TerminalReviewPort:
                         parts[2],
                         value,
                     )
+                    current = self._engine.decide(
+                        current,
+                        status=ReviewStatus.PENDING,
+                        rows=tuple(rows),
+                        override_reason=override_reason,
+                    )
+                    continue
+                if command == "bulk-merchant" and len(parts) >= 3:
+                    reference_index = self._row_index(parts[1], current.rows)
+                    reference_merchant = current.rows[
+                        reference_index
+                    ].current.normalized_merchant
+                    merchant = " ".join(parts[2:]).strip()
+                    if not merchant:
+                        raise ValueError("bulk merchant must not be empty")
+                    rows = [
+                        edit_review_row(row, "merchant", merchant)
+                        if row.current.normalized_merchant == reference_merchant
+                        else row
+                        for row in current.rows
+                    ]
                     current = self._engine.decide(
                         current,
                         status=ReviewStatus.PENDING,
@@ -204,6 +225,7 @@ class TerminalReviewPort:
 
     def _help(self) -> None:
         self._write("edit ROW member|merchant|date|amount|type|category VALUE")
+        self._write("bulk-merchant REFERENCE_ROW MERCHANT")
         self._write("bulk-category CATEGORY ROW [ROW ...]")
         self._write("save-rule ROW exact|contains")
         self._write("resolve-duplicate ROW")

@@ -47,6 +47,7 @@ def pending_review() -> tuple[ReviewEngine, ReviewState]:
     transactions = (
         review_transaction("txn-1", "FIRST CAFE"),
         review_transaction("txn-2", "SECOND CAFE"),
+        review_transaction("txn-3", "FIRST CAFE"),
     )
     statement = NormalizedStatement(
         statement_id="stmt-1",
@@ -58,7 +59,7 @@ def pending_review() -> tuple[ReviewEngine, ReviewState]:
         end_date=date(2026, 6, 15),
         closing_date=date(2026, 6, 15),
         transactions=transactions,
-        reported_totals=(StatementTotal("new_charges", Money(Decimal("20.00"))),),
+        reported_totals=(StatementTotal("new_charges", Money(Decimal("30.00"))),),
         warnings=(),
     )
     config = WorkbookConfig(
@@ -89,7 +90,7 @@ class TerminalReviewPortTests(unittest.TestCase):
         output = StringIO()
         reviewer = TerminalReviewPort(
             input_stream=StringIO(
-                "filter exceptions\nbulk-category dining 1 2\nsave-rule 1 exact\napprove\n"
+                "filter exceptions\nbulk-category dining 1 2 3\nsave-rule 1 exact\napprove\n"
             ),
             output_stream=output,
             engine=engine,
@@ -99,7 +100,7 @@ class TerminalReviewPortTests(unittest.TestCase):
 
         self.assertEqual(ReviewStatus.APPROVED, decision.status)
         self.assertEqual(
-            ("dining", "dining"),
+            ("dining", "dining", "dining"),
             tuple(row.current.category_id for row in decision.rows),
         )
         self.assertEqual(1, len(decision.saved_rules))
@@ -141,6 +142,7 @@ class TerminalReviewPortTests(unittest.TestCase):
         reviewer = TerminalReviewPort(
             input_stream=StringIO(
                 "bulk-category dining 1 2\n"
+                "bulk-category dining 3\n"
                 "edit 1 amount 12.00\n"
                 "override Confirmed against statement\n"
                 "approve\n"
@@ -156,4 +158,21 @@ class TerminalReviewPortTests(unittest.TestCase):
         self.assertEqual(
             "Confirmed against statement",
             decision.reconciliation.override_reason,
+        )
+
+    def test_bulk_merchant_renames_every_identical_current_merchant(self) -> None:
+        engine, state = pending_review()
+        output = StringIO()
+        reviewer = TerminalReviewPort(
+            input_stream=StringIO("bulk-merchant 1 FIRST COFFEE\ncancel\n"),
+            output_stream=output,
+            engine=engine,
+        )
+
+        decision = reviewer.review(state)
+
+        self.assertEqual(ReviewStatus.CANCELLED, decision.status)
+        self.assertEqual(
+            ("FIRST COFFEE", "SECOND CAFE", "FIRST COFFEE"),
+            tuple(row.current.normalized_merchant for row in decision.rows),
         )
