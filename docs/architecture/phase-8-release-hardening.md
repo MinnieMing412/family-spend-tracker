@@ -41,3 +41,8 @@ Real institution samples and Google chart rendering remain local/manual release
 checks because neither private statements nor a household workbook belongs in
 CI. The operations guide records the required parser, review, reconciliation,
 and Dashboard acceptance checklist.
+
+The household release accepts Bank of America and Chase text-bearing layouts.
+AMEX remains implemented and fixture-tested for text-bearing statements but is
+deferred from household acceptance: all three available real samples are
+image-only and correctly fail closed, while OCR remains outside this phase.

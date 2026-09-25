@@ -1,11 +1,17 @@
 # Family Spend Tracker
 
-A privacy-conscious macOS CLI for importing AMEX, Bank of America, and Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
+A privacy-conscious macOS CLI for importing text-bearing Bank of America and
+Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
 
 The project is under active implementation. The current vertical slice imports
-reviewed AMEX, Bank of America, and Chase statements into Google Sheets with
+reviewed Bank of America and Chase statements into Google Sheets with
 duplicate protection, retry-safe writes, and import audit records. Historical
 folders can be processed sequentially with resumable checkpoints.
+
+The AMEX text-PDF parser remains covered by synthetic acceptance fixtures, but
+AMEX is deferred from the current household release because every available real
+statement is image-only. Image-only statements are rejected before parsing or
+upload; local OCR is a possible follow-up phase.
 
 ## Development setup
 

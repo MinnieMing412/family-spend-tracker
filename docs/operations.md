@@ -119,10 +119,16 @@ The Google account's security settings can also revoke the application's grant.
 
 ## Manual release acceptance
 
-Before household use, validate one local sample from AMEX, Bank of America, and
-Chase without copying it into the checkout. Confirm each sample's institution,
-masked account, dates, transaction count, section reconciliation, member mapping,
-and review behavior. Approve only after those values match the statement.
+Before household use, validate one local sample from Bank of America and Chase
+without copying it into the checkout. Confirm each sample's institution, masked
+account, dates, transaction count, section reconciliation, member mapping, and
+review behavior. Approve only after those values match the statement.
+
+AMEX is deferred from the current household release. Its text-PDF parser remains
+covered by synthetic fixtures, but the available real statements are image-only
+and are intentionally rejected before parsing or upload. Do not treat OCR output
+as an approved workaround; OCR requires a separately designed and validated
+local workflow.
 
 In Google Sheets, complete the Dashboard checklist in
 [`docs/architecture/phase-7-dashboard.md`](architecture/phase-7-dashboard.md).

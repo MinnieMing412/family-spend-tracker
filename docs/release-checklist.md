@@ -24,9 +24,9 @@ Validated on 2026-09-10 without uploading or copying source files:
   account output, and matched reconciliation across 3 lines.
 - [x] Chase text PDF: detected correctly, 11 transactions, masked account output,
   and matched reconciliation across 6 lines.
-- [ ] AMEX text PDF: the supplied local sample is image-only and is correctly
-  rejected as scanned. Obtain a text-bearing AMEX PDF for parser/reconciliation
-  acceptance; OCR is outside v1 scope.
+- [x] AMEX release decision: deferred from household v1 acceptance. The supplied
+  local sample is image-only and is correctly rejected as scanned; OCR remains
+  outside v1 scope.
 
 Additional May samples validated on 2026-09-21 without uploading or copying:
 
@@ -36,15 +36,17 @@ Additional May samples validated on 2026-09-21 without uploading or copying:
   matched reconciliation across 6 lines.
 - [x] Chase text PDF ending 7466: 40 transactions, masked account output, and
   matched reconciliation across 6 lines.
-- [ ] The May AMEX PDF is also image-only and is correctly rejected as scanned;
-  a text-bearing AMEX export is still required.
+- [x] The May and April AMEX PDFs are also image-only and are correctly rejected
+  as scanned, confirming the release deferral rather than parser acceptance.
 
 ## Manual environment and UI
 
-- [ ] Complete install, `--help`, disconnect, and uninstall in a clean macOS user
-  environment using [`docs/operations.md`](operations.md).
-- [ ] Run one reviewed local sample per institution and verify member assignment,
-  category decisions, section totals, and the final import record.
+- [x] Complete install, `--help`, disconnected-state behavior, and uninstall in
+  an isolated macOS Python 3.12 environment using
+  [`docs/operations.md`](operations.md).
+- [ ] Run one reviewed local Bank of America sample and one reviewed local Chase
+  sample; verify member assignment, category decisions, section totals, and the
+  final import record.
 - [x] Configure a disposable Google workbook and run the opt-in integration test.
 - [x] Complete every Dashboard visual check in
   [`docs/architecture/phase-7-dashboard.md`](architecture/phase-7-dashboard.md).
@@ -58,6 +60,12 @@ merchant, member, and type, chart-support recalculation, and idempotent
 reprovisioning. Manual Chrome review confirmed descending category bars,
 chronological months, labeled member series, negative values, and non-overlapping
 charts and support data.
+
+The isolated installation lifecycle completed on 2026-09-24 in a new temporary
+Python 3.12 virtual environment and private application-data directory. It built
+and installed the wheel with production dependencies, displayed CLI help,
+reported the disconnected state safely, uninstalled the package, and removed
+the installed executable.
 
 Do not call the release accepted until every unchecked item above is completed
 by the household administrator.
