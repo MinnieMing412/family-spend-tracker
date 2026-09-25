@@ -88,12 +88,13 @@ family-spend import /path/to/statement.pdf
 The command rejects encrypted, corrupt, scanned/image-only, unsupported, and
 ambiguous documents before parsing. It then resolves ownership, normalizes
 merchants, applies workbook rules, reconciles statement sections, and displays
-a text-labeled review table. Enter `help` at the `review>` prompt to see edit,
-filter, bulk-category, bulk-merchant, rule-save, reconciliation-override,
-approval, and cancel commands. `bulk-merchant ROW NAME` renames every current
-row whose merchant matches the reference row. `save-rule ROW exact|contains`
-stores the reviewed merchant/category decision for later imports; it does not
-retroactively edit other rows in the current review.
+a text-labeled review table. A command guide appears beneath every rendered
+table, immediately before the `review>` prompt, so edit, filter, bulk-category,
+bulk-merchant, rule-save, reconciliation-override, approval, and cancellation
+syntax remains visible throughout review. `bulk-merchant ROW NAME` renames every
+current row whose merchant matches the reference row. `save-rule ROW
+exact|contains` stores the reviewed merchant/category decision for later
+imports; it does not retroactively edit other rows in the current review.
 
 Approval writes the reviewed transactions and any selected merchant rules. The
 same statement is skipped on repeat, exact overlapping rows are omitted, and

@@ -176,3 +176,6 @@ class TerminalReviewPortTests(unittest.TestCase):
             ("FIRST COFFEE", "SECOND CAFE", "FIRST COFFEE"),
             tuple(row.current.normalized_merchant for row in decision.rows),
         )
+        rendered = output.getvalue()
+        self.assertGreater(rendered.rfind("Commands:"), rendered.rfind("Reconciliation:"))
+        self.assertIn("bulk-merchant REFERENCE_ROW MERCHANT", rendered)

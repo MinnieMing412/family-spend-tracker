@@ -50,6 +50,10 @@ cancellation. `bulk-merchant ROW MERCHANT` updates every current row with the
 same normalized merchant as `ROW`; `save-rule ROW exact|contains` persists a
 reviewed merchant/category decision for subsequent imports only.
 
+Every table render ends with the complete command guide immediately before the
+input prompt. Edits and filters therefore redraw both the current review state
+and its available actions without requiring separate documentation lookup.
+
 Acceptance tests use scripted `ReviewPort` implementations and assert final
 state rather than terminal keystroke internals. Cancellation returns before any
 workbook commit boundary is called.
