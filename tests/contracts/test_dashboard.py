@@ -240,6 +240,7 @@ class DashboardAnalyticsTests(unittest.TestCase):
         )
         self.assertIn("purchase|merchant_credit|fee|cash_advance", helper_formulas)
         self.assertIn("MATCH(Transactions!B3:B", helper_formulas)
+        self.assertIn("(I56:I=1)*(J56:J=TRUE)", helper_formulas)
         self.assertIn('$B$6="All"', helper_formulas)
         self.assertEqual(
             (
@@ -250,6 +251,7 @@ class DashboardAnalyticsTests(unittest.TestCase):
             tuple(chart.title for chart in layout.charts),
         )
         self.assertEqual("BAR", layout.charts[0].chart_type)
+        self.assertEqual("W56:AE200", layout.charts[2].source_range)
         self.assertEqual(("B6", "B7", "B8", "B9"), tuple(item.cell for item in layout.validations))
 
 

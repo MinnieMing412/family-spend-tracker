@@ -78,6 +78,10 @@ class SheetsClient(Protocol):
         """Replace derived dashboard content and charts without touching ledger data."""
         ...
 
+    def dashboard_chart_titles(self, workbook_id: str) -> tuple[str, ...]:
+        """Return native Dashboard chart titles."""
+        ...
+
 
 GoogleServiceBuilder = Callable[[], Any]
 _A1_RANGE = re.compile(r"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$")
@@ -285,6 +289,11 @@ class GoogleApiSheetsClient:
         """Replace the formula-driven dashboard and its native charts idempotently."""
         sheet = self._sheet_metadata(workbook_id, "Dashboard")
         sheet_id = int(sheet["properties"]["sheetId"])
+        column_count = max((len(row) for row in layout.rows), default=1)
+        self._spreadsheets().batchUpdate(
+            spreadsheetId=workbook_id,
+            body={"requests": [self._dashboard_grid_request(sheet_id, column_count)]},
+        ).execute()
         escaped = "Dashboard"
         self._spreadsheets().values().clear(
             spreadsheetId=workbook_id,
@@ -307,6 +316,29 @@ class GoogleApiSheetsClient:
             spreadsheetId=workbook_id,
             body={"requests": requests},
         ).execute()
+
+    @staticmethod
+    def _dashboard_grid_request(sheet_id: int, column_count: int) -> dict[str, Any]:
+        """Expand the fresh sheet before wide dashboard values are written."""
+        return {
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": sheet_id,
+                    "gridProperties": {
+                        "hideGridlines": True,
+                        "rowCount": 30010,
+                        "columnCount": max(column_count, 85),
+                    },
+                    "tabColorStyle": {
+                        "rgbColor": {"red": 0.12, "green": 0.25, "blue": 0.39}
+                    },
+                },
+                "fields": (
+                    "gridProperties.hideGridlines,gridProperties.rowCount,"
+                    "gridProperties.columnCount,tabColorStyle"
+                ),
+            }
+        }
 
     def _sheet_metadata(self, workbook_id: str, name: str) -> dict[str, Any]:
         for sheet in self._metadata(workbook_id).get("sheets", []):
@@ -332,23 +364,6 @@ class GoogleApiSheetsClient:
                     },
                     "cell": {},
                     "fields": "userEnteredFormat,dataValidation",
-                }
-            },
-            {
-                "updateSheetProperties": {
-                    "properties": {
-                        "sheetId": sheet_id,
-                        "gridProperties": {
-                            "hideGridlines": True,
-                            "rowCount": 30010,
-                            "columnCount": max(column_count, 85),
-                        },
-                        "tabColorStyle": {"rgbColor": {"red": 0.12, "green": 0.25, "blue": 0.39}},
-                    },
-                    "fields": (
-                        "gridProperties.hideGridlines,gridProperties.rowCount,"
-                        "gridProperties.columnCount,tabColorStyle"
-                    ),
                 }
             },
             {
@@ -425,8 +440,8 @@ class GoogleApiSheetsClient:
                     }
                 }
             )
-        member_range = _a1_grid_range(sheet_id, layout.charts[2].source_range)
-        category_range = _a1_grid_range(sheet_id, layout.header_ranges[-1])
+        member_range = _a1_grid_range(sheet_id, layout.member_month_support_range)
+        category_range = _a1_grid_range(sheet_id, layout.category_month_support_range)
         for data_range in (member_range, category_range):
             first_column = data_range["startColumnIndex"]
             requests.extend(
@@ -1119,6 +1134,10 @@ class GoogleWorkbookGateway:
                 category_count=sum(category.active for category in configuration.categories),
             ),
         )
+
+    def dashboard_chart_titles(self) -> tuple[str, ...]:
+        """Return native Dashboard chart titles through the workbook boundary."""
+        return self._client.dashboard_chart_titles(self.workbook_id)
 
     def validate_schema(self) -> None:
         """Reject missing, renamed, reordered, or type-incompatible workbook data."""

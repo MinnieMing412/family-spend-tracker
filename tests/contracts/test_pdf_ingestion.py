@@ -169,6 +169,40 @@ class InstitutionDetectionTests(unittest.TestCase):
         with self.assertRaisesRegex(FamilySpendError, "ambiguous"):
             registry.parser_for(source)
 
+    def test_brand_mentions_after_page_one_do_not_override_statement_identity(self) -> None:
+        parser = AmexStatementParser()
+        registry = MarkerParserRegistry(
+            (
+                ParserRegistration(
+                    Institution.BANK_OF_AMERICA,
+                    ("Bank of America", "Account Summary"),
+                    parser,
+                    identity_markers=("Bank of America",),
+                ),
+                ParserRegistration(
+                    Institution.CHASE,
+                    ("CHASE", "Account Activity"),
+                    parser,
+                    identity_markers=("CHASE",),
+                ),
+            )
+        )
+        source = ValidatedPdfDocument(
+            Path("statement.pdf"),
+            "statement.pdf",
+            "a" * 64,
+            2,
+            (
+                "BANK OF AMERICA\nAccount Summary",
+                "PAYMENT TO CHASE\nAccount Activity",
+            ),
+        )
+
+        detection = registry.detect(source)
+
+        self.assertEqual(DetectionStatus.DETECTED, detection.status)
+        self.assertEqual((Institution.BANK_OF_AMERICA,), detection.institutions)
+
 
 class AmexParserContractTests(unittest.TestCase):
     def test_synthetic_statement_matches_expected_normalized_records(self) -> None:

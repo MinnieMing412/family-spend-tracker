@@ -28,6 +28,7 @@ statements/
 tmp/
 cache/
 .cache/
+*.pdf
 *.extracted.txt
 
 # Local retained application data

@@ -1,11 +1,17 @@
 # Family Spend Tracker
 
-A privacy-conscious macOS CLI for importing AMEX, Bank of America, and Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
+A privacy-conscious macOS CLI for importing text-bearing Bank of America and
+Chase statement PDFs into a reviewed, categorized Google Sheets spending ledger.
 
 The project is under active implementation. The current vertical slice imports
-reviewed AMEX, Bank of America, and Chase statements into Google Sheets with
+reviewed Bank of America and Chase statements into Google Sheets with
 duplicate protection, retry-safe writes, and import audit records. Historical
 folders can be processed sequentially with resumable checkpoints.
+
+The AMEX text-PDF parser remains covered by synthetic acceptance fixtures, but
+AMEX is deferred from the current household release because every available real
+statement is image-only. Image-only statements are rejected before parsing or
+upload; local OCR is a possible follow-up phase.
 
 ## Development setup
 
@@ -22,6 +28,9 @@ The current command surface is available with:
 ```bash
 .venv/bin/family-spend --help
 ```
+
+For household installation, workbook configuration, recovery, cache deletion,
+and uninstall instructions, use the [operations guide](docs/operations.md).
 
 ## Connect Google Sheets
 
@@ -79,9 +88,13 @@ family-spend import /path/to/statement.pdf
 The command rejects encrypted, corrupt, scanned/image-only, unsupported, and
 ambiguous documents before parsing. It then resolves ownership, normalizes
 merchants, applies workbook rules, reconciles statement sections, and displays
-a text-labeled review table. Enter `help` at the `review>` prompt to see edit,
-filter, bulk-category, rule-save, reconciliation-override, approval, and cancel
-commands.
+a text-labeled review table. A command guide appears beneath every rendered
+table, immediately before the `review>` prompt, so edit, filter, bulk-category,
+bulk-merchant, rule-save, reconciliation-override, approval, and cancellation
+syntax remains visible throughout review. `bulk-merchant ROW NAME` renames every
+current row whose merchant matches the reference row. `save-rule ROW
+exact|contains` stores the reviewed merchant/category decision for later
+imports; it does not retroactively edit other rows in the current review.
 
 Approval writes the reviewed transactions and any selected merchant rules. The
 same statement is skipped on repeat, exact overlapping rows are omitted, and
@@ -149,6 +162,9 @@ remain negative and may produce a negative category total.
 - [Phase 5B Chase parser architecture](docs/architecture/phase-5b-chase-parser.md)
 - [Phase 6 backfill architecture](docs/architecture/phase-6-backfill.md)
 - [Phase 7 dashboard architecture](docs/architecture/phase-7-dashboard.md)
+- [Phase 8 release-hardening architecture](docs/architecture/phase-8-release-hardening.md)
+- [Operations guide](docs/operations.md)
+- [v1 release checklist](docs/release-checklist.md)
 - [Issue workflow](docs/agents/issue-tracker.md)
 
 ## Privacy
