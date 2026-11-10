@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Callable
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Protocol, cast
+
+from googleapiclient.errors import HttpError
 
 from family_spend.adapters.google_auth import GOOGLE_SHEETS_SCOPE
 from family_spend.adapters.local import FileCredentialStore
@@ -30,6 +33,7 @@ from family_spend.domain.models import (
     WorkbookConfig,
     validate_masked_account_identifier,
 )
+from family_spend.errors import FamilySpendError
 from family_spend.workbook_schema import CATEGORY_SEEDS, SCHEMA_VERSION, WORKSHEET_SCHEMAS
 
 
@@ -64,6 +68,14 @@ class SheetsClient(Protocol):
         """Read all populated rows from one worksheet."""
         ...
 
+    def read_many_rows(
+        self,
+        workbook_id: str,
+        worksheets: tuple[str, ...],
+    ) -> dict[str, tuple[tuple[object, ...], ...]]:
+        """Read multiple worksheets in one provider request."""
+        ...
+
     def write_rows(
         self,
         workbook_id: str,
@@ -72,6 +84,17 @@ class SheetsClient(Protocol):
         rows: tuple[tuple[object, ...], ...],
     ) -> None:
         """Replace rows beginning at the one-based row number."""
+        ...
+
+    def write_many_rows(
+        self,
+        workbook_id: str,
+        writes: tuple[
+            tuple[str, int, tuple[tuple[object, ...], ...]],
+            ...,
+        ],
+    ) -> None:
+        """Apply multiple row writes atomically in one provider request."""
         ...
 
     def replace_dashboard(self, workbook_id: str, layout: DashboardLayout) -> None:
@@ -84,6 +107,7 @@ class SheetsClient(Protocol):
 
 
 GoogleServiceBuilder = Callable[[], Any]
+Sleeper = Callable[[float], None]
 _A1_RANGE = re.compile(r"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$")
 
 
@@ -138,34 +162,70 @@ class GoogleApiSheetsClient:
         credential_store: FileCredentialStore,
         *,
         service_builder: GoogleServiceBuilder | None = None,
+        sleeper: Sleeper = time.sleep,
+        rate_limit_retries: int = 6,
     ) -> None:
         """Create a client that builds an authorized service for each operation."""
         self._credential_store = credential_store
         self._service_builder = service_builder or (
             lambda: _authorized_sheets_service(self._credential_store)
         )
+        self._sleeper = sleeper
+        self._rate_limit_retries = rate_limit_retries
+        self._metadata_cache: dict[str, dict[str, Any]] = {}
 
     def _spreadsheets(self) -> Any:
         """Return the official API's spreadsheets resource."""
         return self._service_builder().spreadsheets()
 
+    def _execute(self, request: Any) -> Any:
+        """Execute one API request, backing off across a one-minute 429 window."""
+        for attempt in range(self._rate_limit_retries + 1):
+            try:
+                return request.execute()
+            except HttpError as error:
+                if error.resp.status != 429:
+                    raise
+                if attempt == self._rate_limit_retries:
+                    raise FamilySpendError(
+                        "Google Sheets is temporarily rate limited. Wait one minute, then retry "
+                        "the same command with --resume."
+                    ) from error
+                retry_after = error.resp.get("retry-after")
+                delay = float(retry_after) if retry_after else float(2**attempt)
+                self._sleeper(max(1.0, min(delay, 60.0)))
+        raise AssertionError("unreachable Google request retry state")
+
     def _metadata(self, workbook_id: str) -> dict[str, Any]:
         """Read worksheet properties and developer metadata."""
-        result = self._spreadsheets().get(
-            spreadsheetId=workbook_id,
-            fields=(
-                "sheets(properties(sheetId,title),charts(chartId,spec.title)),"
-                "developerMetadata(metadataId,metadataKey,metadataValue)"
-            ),
-        ).execute()
-        return cast(dict[str, Any], result)
+        cached = self._metadata_cache.get(workbook_id)
+        if cached is not None:
+            return cached
+        result = self._execute(
+            self._spreadsheets().get(
+                spreadsheetId=workbook_id,
+                fields=(
+                    "sheets(properties(sheetId,title),charts(chartId,spec.title)),"
+                    "developerMetadata(metadataId,metadataKey,metadataValue)"
+                ),
+            )
+        )
+        metadata = cast(dict[str, Any], result)
+        self._metadata_cache[workbook_id] = metadata
+        return metadata
+
+    def _invalidate_metadata(self, workbook_id: str) -> None:
+        """Drop command-scoped metadata after a structural workbook write."""
+        self._metadata_cache.pop(workbook_id, None)
 
     def create_workbook(self, title: str) -> str:
         """Create a Google spreadsheet and return its identifier."""
-        result = self._spreadsheets().create(
-            body={"properties": {"title": title}},
-            fields="spreadsheetId",
-        ).execute()
+        result = self._execute(
+            self._spreadsheets().create(
+                body={"properties": {"title": title}},
+                fields="spreadsheetId",
+            )
+        )
         return str(cast(dict[str, Any], result)["spreadsheetId"])
 
     def worksheet_names(self, workbook_id: str) -> tuple[str, ...]:
@@ -183,22 +243,25 @@ class GoogleApiSheetsClient:
 
     def rename_worksheet(self, workbook_id: str, old_name: str, new_name: str) -> None:
         """Rename one worksheet through an atomic batch update."""
-        self._spreadsheets().batchUpdate(
-            spreadsheetId=workbook_id,
-            body={
-                "requests": [
-                    {
-                        "updateSheetProperties": {
-                            "properties": {
-                                "sheetId": self._sheet_id(workbook_id, old_name),
-                                "title": new_name,
-                            },
-                            "fields": "title",
+        self._execute(
+            self._spreadsheets().batchUpdate(
+                spreadsheetId=workbook_id,
+                body={
+                    "requests": [
+                        {
+                            "updateSheetProperties": {
+                                "properties": {
+                                    "sheetId": self._sheet_id(workbook_id, old_name),
+                                    "title": new_name,
+                                },
+                                "fields": "title",
+                            }
                         }
-                    }
-                ]
-            },
-        ).execute()
+                    ]
+                },
+            )
+        )
+        self._invalidate_metadata(workbook_id)
 
     def dashboard_chart_titles(self, workbook_id: str) -> tuple[str, ...]:
         """Return native Dashboard chart titles for integration verification."""
@@ -209,10 +272,13 @@ class GoogleApiSheetsClient:
 
     def add_worksheet(self, workbook_id: str, name: str) -> None:
         """Append one worksheet through an atomic batch update."""
-        self._spreadsheets().batchUpdate(
-            spreadsheetId=workbook_id,
-            body={"requests": [{"addSheet": {"properties": {"title": name}}}]},
-        ).execute()
+        self._execute(
+            self._spreadsheets().batchUpdate(
+                spreadsheetId=workbook_id,
+                body={"requests": [{"addSheet": {"properties": {"title": name}}}]},
+            )
+        )
+        self._invalidate_metadata(workbook_id)
 
     def schema_version(self, workbook_id: str) -> str | None:
         """Read the application schema version from developer metadata."""
@@ -253,21 +319,56 @@ class GoogleApiSheetsClient:
                     "fields": "metadataValue",
                 }
             }
-        self._spreadsheets().batchUpdate(
-            spreadsheetId=workbook_id,
-            body={"requests": [request]},
-        ).execute()
+        self._execute(
+            self._spreadsheets().batchUpdate(
+                spreadsheetId=workbook_id,
+                body={"requests": [request]},
+            )
+        )
+        self._invalidate_metadata(workbook_id)
 
     def read_rows(self, workbook_id: str, worksheet: str) -> tuple[tuple[object, ...], ...]:
         """Read populated rows from one worksheet."""
         escaped = worksheet.replace("'", "''")
-        result = self._spreadsheets().values().get(
-            spreadsheetId=workbook_id,
-            range=f"'{escaped}'",
-            majorDimension="ROWS",
-        ).execute()
+        result = self._execute(
+            self._spreadsheets().values().get(
+                spreadsheetId=workbook_id,
+                range=f"'{escaped}'",
+                majorDimension="ROWS",
+            )
+        )
         rows = cast(dict[str, Any], result).get("values", [])
         return tuple(tuple(cast(list[object], row)) for row in rows)
+
+    def read_many_rows(
+        self,
+        workbook_id: str,
+        worksheets: tuple[str, ...],
+    ) -> dict[str, tuple[tuple[object, ...], ...]]:
+        """Read several worksheets with one values.batchGet quota request."""
+        escaped = tuple("'" + name.replace("'", "''") + "'" for name in worksheets)
+        result = cast(
+            dict[str, Any],
+            self._execute(
+                self._spreadsheets().values().batchGet(
+                    spreadsheetId=workbook_id,
+                    ranges=list(escaped),
+                    majorDimension="ROWS",
+                )
+            ),
+        )
+        value_ranges = cast(list[dict[str, Any]], result.get("valueRanges", []))
+        return {
+            worksheet: tuple(
+                tuple(cast(list[object], row))
+                for row in (
+                    value_ranges[index].get("values", [])
+                    if index < len(value_ranges)
+                    else []
+                )
+            )
+            for index, worksheet in enumerate(worksheets)
+        }
 
     def write_rows(
         self,
@@ -278,44 +379,83 @@ class GoogleApiSheetsClient:
     ) -> None:
         """Write rows with RAW input so IDs and machine keys are preserved."""
         escaped = worksheet.replace("'", "''")
-        self._spreadsheets().values().update(
-            spreadsheetId=workbook_id,
-            range=f"'{escaped}'!A{start_row}",
-            valueInputOption="RAW",
-            body={"majorDimension": "ROWS", "values": [list(row) for row in rows]},
-        ).execute()
+        self._execute(
+            self._spreadsheets().values().update(
+                spreadsheetId=workbook_id,
+                range=f"'{escaped}'!A{start_row}",
+                valueInputOption="RAW",
+                body={"majorDimension": "ROWS", "values": [list(row) for row in rows]},
+            )
+        )
+
+    def write_many_rows(
+        self,
+        workbook_id: str,
+        writes: tuple[
+            tuple[str, int, tuple[tuple[object, ...], ...]],
+            ...,
+        ],
+    ) -> None:
+        """Write several ranges atomically with one values.batchUpdate request."""
+        if not writes:
+            return
+        data = []
+        for worksheet, start_row, rows in writes:
+            escaped = worksheet.replace("'", "''")
+            data.append(
+                {
+                    "range": f"'{escaped}'!A{start_row}",
+                    "majorDimension": "ROWS",
+                    "values": [list(row) for row in rows],
+                }
+            )
+        self._execute(
+            self._spreadsheets().values().batchUpdate(
+                spreadsheetId=workbook_id,
+                body={"valueInputOption": "RAW", "data": data},
+            )
+        )
 
     def replace_dashboard(self, workbook_id: str, layout: DashboardLayout) -> None:
         """Replace the formula-driven dashboard and its native charts idempotently."""
         sheet = self._sheet_metadata(workbook_id, "Dashboard")
         sheet_id = int(sheet["properties"]["sheetId"])
         column_count = max((len(row) for row in layout.rows), default=1)
-        self._spreadsheets().batchUpdate(
-            spreadsheetId=workbook_id,
-            body={"requests": [self._dashboard_grid_request(sheet_id, column_count)]},
-        ).execute()
+        self._execute(
+            self._spreadsheets().batchUpdate(
+                spreadsheetId=workbook_id,
+                body={"requests": [self._dashboard_grid_request(sheet_id, column_count)]},
+            )
+        )
+        self._invalidate_metadata(workbook_id)
         escaped = "Dashboard"
-        self._spreadsheets().values().clear(
-            spreadsheetId=workbook_id,
-            range=f"'{escaped}'",
-            body={},
-        ).execute()
-        self._spreadsheets().values().update(
-            spreadsheetId=workbook_id,
-            range=f"'{escaped}'!A1",
-            valueInputOption="USER_ENTERED",
-            body={"majorDimension": "ROWS", "values": [list(row) for row in layout.rows]},
-        ).execute()
+        self._execute(
+            self._spreadsheets().values().clear(
+                spreadsheetId=workbook_id,
+                range=f"'{escaped}'",
+                body={},
+            )
+        )
+        self._execute(
+            self._spreadsheets().values().update(
+                spreadsheetId=workbook_id,
+                range=f"'{escaped}'!A1",
+                valueInputOption="USER_ENTERED",
+                body={"majorDimension": "ROWS", "values": [list(row) for row in layout.rows]},
+            )
+        )
         requests: list[dict[str, Any]] = [
             {"deleteEmbeddedObject": {"objectId": int(chart["chartId"])}}
             for chart in sheet.get("charts", [])
         ]
         requests.extend(self._dashboard_format_requests(sheet_id, layout))
         requests.extend(self._chart_request(sheet_id, chart) for chart in layout.charts)
-        self._spreadsheets().batchUpdate(
-            spreadsheetId=workbook_id,
-            body={"requests": requests},
-        ).execute()
+        self._execute(
+            self._spreadsheets().batchUpdate(
+                spreadsheetId=workbook_id,
+                body={"requests": requests},
+            )
+        )
 
     @staticmethod
     def _dashboard_grid_request(sheet_id: int, column_count: int) -> dict[str, Any]:
@@ -1038,6 +1178,7 @@ class GoogleWorkbookGateway:
         """Create a gateway backed by the supplied Sheets client."""
         self._client = client
         self._workbook_id = workbook_id
+        self._snapshot_rows: dict[str, tuple[tuple[object, ...], ...]] | None = None
 
     @property
     def workbook_id(self) -> str:
@@ -1046,6 +1187,7 @@ class GoogleWorkbookGateway:
 
     def provision_schema(self) -> None:
         """Idempotently create required worksheets, headers, and categories."""
+        self._snapshot_rows = None
         names = self._client.worksheet_names(self.workbook_id)
         required_names = tuple(schema.name for schema in WORKSHEET_SCHEMAS)
         existing_version = self._client.schema_version(self.workbook_id)
@@ -1123,6 +1265,7 @@ class GoogleWorkbookGateway:
                 seeded_category_rows,
             )
         self.provision_dashboard()
+        self._snapshot_rows = None
 
     def provision_dashboard(self) -> None:
         """Replace derived formulas, controls, formatting, and charts idempotently."""
@@ -1147,9 +1290,11 @@ class GoogleWorkbookGateway:
         for schema in WORKSHEET_SCHEMAS:
             if schema.name not in names:
                 raise ValueError(f"required worksheet is missing: {schema.name}")
+        snapshot = self._load_snapshot(force=True)
+        for schema in WORKSHEET_SCHEMAS:
             if not schema.columns:
                 continue
-            rows = self._client.read_rows(self.workbook_id, schema.name)
+            rows = snapshot[schema.name]
             expected_keys = tuple(column.key for column in schema.columns)
             expected_headers = tuple(column.header for column in schema.columns)
             if len(rows) < 2 or rows[0] != expected_keys or rows[1] != expected_headers:
@@ -1159,14 +1304,15 @@ class GoogleWorkbookGateway:
 
     def load_configuration(self) -> WorkbookConfig:
         """Validate and load members, accounts, categories, and merchant rules."""
-        self.validate_schema()
+        if self._snapshot_rows is None:
+            self.validate_schema()
         return self._load_configuration()
 
     def latest_successful_import(self) -> datetime | None:
         """Return the newest completed import timestamp recorded in the workbook."""
         rows = _data_rows(
             "Imports",
-            self._client.read_rows(self.workbook_id, "Imports")[2:],
+            self._rows("Imports")[2:],
         )
         timestamps: list[datetime] = []
         for row in rows:
@@ -1179,7 +1325,7 @@ class GoogleWorkbookGateway:
         """Count failed, pending, or unreconciled import audit rows."""
         rows = _data_rows(
             "Imports",
-            self._client.read_rows(self.workbook_id, "Imports")[2:],
+            self._rows("Imports")[2:],
         )
         return sum(
             str(row[10]) in {ImportStatus.PENDING.value, ImportStatus.FAILED.value}
@@ -1195,11 +1341,11 @@ class GoogleWorkbookGateway:
         """Find an authoritative staged or completed import by statement hash."""
         import_rows = _data_rows(
             "Imports",
-            self._client.read_rows(self.workbook_id, "Imports")[2:],
+            self._rows("Imports")[2:],
         )
         transaction_rows = _data_rows(
             "Transactions",
-            self._client.read_rows(self.workbook_id, "Transactions")[2:],
+            self._rows("Transactions")[2:],
         )
         for row in import_rows:
             if str(row[2]) != statement_hash:
@@ -1227,7 +1373,7 @@ class GoogleWorkbookGateway:
         requested = set(fingerprints)
         rows = _data_rows(
             "Transactions",
-            self._client.read_rows(self.workbook_id, "Transactions")[2:],
+            self._rows("Transactions")[2:],
         )
         _validate_transaction_rows(rows)
         return tuple(_transaction_from_row(row) for row in rows if str(row[1]) in requested)
@@ -1241,7 +1387,7 @@ class GoogleWorkbookGateway:
         """Return authoritative rows in an inclusive account/date window."""
         rows = _data_rows(
             "Transactions",
-            self._client.read_rows(self.workbook_id, "Transactions")[2:],
+            self._rows("Transactions")[2:],
         )
         _validate_transaction_rows(rows)
         transactions = tuple(_transaction_from_row(row) for row in rows)
@@ -1254,14 +1400,14 @@ class GoogleWorkbookGateway:
         )
 
     def commit_import(self, approved_import: ApprovedImport) -> ImportResult:
-        """Converge a staged import to one complete audit row and stable ledger rows."""
+        """Atomically commit one approved import from the command-scoped snapshot."""
         statement = approved_import.statement
         if any(transaction.fingerprint is None for transaction in statement.transactions):
             raise ValueError("approved transactions require fingerprints")
 
         import_rows = _data_rows(
             "Imports",
-            self._client.read_rows(self.workbook_id, "Imports")[2:],
+            self._rows("Imports")[2:],
         )
         matching_index = next(
             (
@@ -1289,16 +1435,9 @@ class GoogleWorkbookGateway:
         else:
             import_row_number = len(import_rows) + 3
 
-        self._client.write_rows(
-            self.workbook_id,
-            "Imports",
-            import_row_number,
-            (_import_row(approved_import, ImportStatus.PENDING),),
-        )
-
         transaction_rows = _data_rows(
             "Transactions",
-            self._client.read_rows(self.workbook_id, "Transactions")[2:],
+            self._rows("Transactions")[2:],
         )
         existing_transaction_ids = {str(row[0]) for row in transaction_rows}
         existing_fingerprints = {str(row[1]) for row in transaction_rows}
@@ -1308,17 +1447,13 @@ class GoogleWorkbookGateway:
             if transaction.transaction_id not in existing_transaction_ids
             and transaction.fingerprint not in existing_fingerprints
         )
-        if missing_transactions:
-            self._client.write_rows(
-                self.workbook_id,
-                "Transactions",
-                len(transaction_rows) + 3,
-                tuple(_transaction_row(transaction) for transaction in missing_transactions),
-            )
+        new_transaction_rows = tuple(
+            _transaction_row(transaction) for transaction in missing_transactions
+        )
 
         rule_rows = _data_rows(
             "Merchant Rules",
-            self._client.read_rows(self.workbook_id, "Merchant Rules")[2:],
+            self._rows("Merchant Rules")[2:],
         )
         existing_rule_ids = {str(row[0]) for row in rule_rows}
         missing_rules = tuple(
@@ -1326,20 +1461,27 @@ class GoogleWorkbookGateway:
             for rule in approved_import.merchant_rules
             if rule.rule_id not in existing_rule_ids
         )
-        if missing_rules:
-            self._client.write_rows(
-                self.workbook_id,
-                "Merchant Rules",
-                len(rule_rows) + 3,
-                tuple(_merchant_rule_row(rule) for rule in missing_rules),
+        new_rule_rows = tuple(_merchant_rule_row(rule) for rule in missing_rules)
+        complete_import_row = _import_row(approved_import, ImportStatus.COMPLETE)
+        writes: list[tuple[str, int, tuple[tuple[object, ...], ...]]] = []
+        if new_transaction_rows:
+            writes.append(
+                ("Transactions", len(transaction_rows) + 3, new_transaction_rows)
             )
-
-        self._client.write_rows(
-            self.workbook_id,
-            "Imports",
-            import_row_number,
-            (_import_row(approved_import, ImportStatus.COMPLETE),),
-        )
+        if new_rule_rows:
+            writes.append(("Merchant Rules", len(rule_rows) + 3, new_rule_rows))
+        writes.append(("Imports", import_row_number, (complete_import_row,)))
+        try:
+            self._client.write_many_rows(
+                self.workbook_id,
+                tuple(writes),
+            )
+        except Exception:
+            self._snapshot_rows = None
+            raise
+        self._append_snapshot_rows("Transactions", new_transaction_rows)
+        self._append_snapshot_rows("Merchant Rules", new_rule_rows)
+        self._set_snapshot_row("Imports", import_row_number, complete_import_row)
         transaction_ids = tuple(
             transaction.transaction_id for transaction in statement.transactions
         )
@@ -1353,19 +1495,19 @@ class GoogleWorkbookGateway:
     def _load_configuration(self) -> WorkbookConfig:
         member_rows = _data_rows(
             "Members",
-            self._client.read_rows(self.workbook_id, "Members")[2:],
+            self._rows("Members")[2:],
         )
         account_rows = _data_rows(
             "Accounts",
-            self._client.read_rows(self.workbook_id, "Accounts")[2:],
+            self._rows("Accounts")[2:],
         )
         category_rows = _data_rows(
             "Categories",
-            self._client.read_rows(self.workbook_id, "Categories")[2:],
+            self._rows("Categories")[2:],
         )
         rule_rows = _data_rows(
             "Merchant Rules",
-            self._client.read_rows(self.workbook_id, "Merchant Rules")[2:],
+            self._rows("Merchant Rules")[2:],
         )
         return _configuration_from_rows(
             member_rows,
@@ -1373,6 +1515,58 @@ class GoogleWorkbookGateway:
             category_rows,
             rule_rows,
         )
+
+    def _load_snapshot(
+        self,
+        *,
+        force: bool = False,
+    ) -> dict[str, tuple[tuple[object, ...], ...]]:
+        """Load all authoritative worksheets in one command-scoped batch read."""
+        if self._snapshot_rows is None or force:
+            worksheets = tuple(
+                schema.name for schema in WORKSHEET_SCHEMAS if schema.columns
+            )
+            self._snapshot_rows = self._client.read_many_rows(
+                self.workbook_id,
+                worksheets,
+            )
+        return self._snapshot_rows
+
+    def _rows(self, worksheet: str) -> tuple[tuple[object, ...], ...]:
+        """Return one worksheet from the command-scoped snapshot."""
+        if self._snapshot_rows is None:
+            self.validate_schema()
+        assert self._snapshot_rows is not None
+        return self._snapshot_rows[worksheet]
+
+    def _append_snapshot_rows(
+        self,
+        worksheet: str,
+        rows: tuple[tuple[object, ...], ...],
+    ) -> None:
+        """Reflect an atomic append in the local snapshot without another read."""
+        if not rows:
+            return
+        assert self._snapshot_rows is not None
+        self._snapshot_rows[worksheet] = (*self._snapshot_rows[worksheet], *rows)
+
+    def _set_snapshot_row(
+        self,
+        worksheet: str,
+        row_number: int,
+        row: tuple[object, ...],
+    ) -> None:
+        """Reflect an atomic append or replacement in the local snapshot."""
+        assert self._snapshot_rows is not None
+        rows = list(self._snapshot_rows[worksheet])
+        index = row_number - 1
+        while len(rows) < index:
+            rows.append(())
+        if index < len(rows):
+            rows[index] = row
+        else:
+            rows.append(row)
+        self._snapshot_rows[worksheet] = tuple(rows)
 
 class GoogleWorkbookFactory:
     """Create or connect Google workbook gateways using one Sheets client."""

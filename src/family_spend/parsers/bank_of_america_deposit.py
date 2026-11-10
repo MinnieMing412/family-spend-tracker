@@ -185,7 +185,9 @@ class BankOfAmericaDepositStatementParser:
         lowered = page_text.casefold()
         end = lowered.rfind(total_heading.casefold())
         if end < 0:
-            return ()
+            end = lowered.rfind("continued on the next page")
+            if end < 0:
+                return ()
         start = lowered.rfind(heading.casefold(), 0, end)
         if start < 0:
             return ()

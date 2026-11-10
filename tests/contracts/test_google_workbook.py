@@ -7,6 +7,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from googleapiclient.errors import HttpError
+from httplib2 import Response
+
 from family_spend.adapters.google import GoogleApiSheetsClient, GoogleWorkbookFactory
 from family_spend.adapters.google_auth import (
     GOOGLE_EMAIL_SCOPE,
@@ -29,38 +32,211 @@ from tests.import_helpers import ApprovingReviewer, build_ingestion, write_state
 
 
 class FaultInjectingSheetsClient(InMemorySheetsClient):
-    """Raise once at a selected workbook write boundary."""
+    """Raise once before or after an atomic workbook batch write."""
 
     def __init__(self) -> None:
         super().__init__()
-        self._write_count = 0
-        self._failure_write: int | None = None
-        self._fail_after_write = False
+        self._fail_batch_after_write: bool | None = None
 
-    def inject_failure(self, write_number: int, *, after_write: bool = False) -> None:
-        self._write_count = 0
-        self._failure_write = write_number
-        self._fail_after_write = after_write
+    def inject_batch_failure(self, *, after_write: bool = False) -> None:
+        self._fail_batch_after_write = after_write
 
-    def write_rows(
+    def write_many_rows(
         self,
         workbook_id: str,
-        worksheet: str,
-        start_row: int,
-        rows: tuple[tuple[object, ...], ...],
+        writes: tuple[
+            tuple[str, int, tuple[tuple[object, ...], ...]],
+            ...,
+        ],
     ) -> None:
-        self._write_count += 1
-        should_fail = self._write_count == self._failure_write
-        if should_fail and not self._fail_after_write:
-            self._failure_write = None
+        failure = self._fail_batch_after_write
+        self._fail_batch_after_write = None
+        if failure is False:
             raise RuntimeError("injected Google write failure")
-        super().write_rows(workbook_id, worksheet, start_row, rows)
-        if should_fail:
-            self._failure_write = None
+        super().write_many_rows(workbook_id, writes)
+        if failure is True:
             raise RuntimeError("injected Google write failure")
+
+
+class CountingSheetsClient(InMemorySheetsClient):
+    """Count provider-style batch boundaries used by one import command."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.batch_read_count = 0
+        self.batch_write_count = 0
+
+    def read_many_rows(
+        self,
+        workbook_id: str,
+        worksheets: tuple[str, ...],
+    ) -> dict[str, tuple[tuple[object, ...], ...]]:
+        self.batch_read_count += 1
+        return super().read_many_rows(workbook_id, worksheets)
+
+    def write_many_rows(
+        self,
+        workbook_id: str,
+        writes: tuple[
+            tuple[str, int, tuple[tuple[object, ...], ...]],
+            ...,
+        ],
+    ) -> None:
+        self.batch_write_count += 1
+        super().write_many_rows(workbook_id, writes)
 
 
 class GoogleWorkbookGatewayContractTests(unittest.TestCase):
+    def test_google_client_batches_values_and_caches_command_metadata(self) -> None:
+        class Request:
+            def __init__(self, result: dict[str, object]) -> None:
+                self._result = result
+
+            def execute(self) -> dict[str, object]:
+                return self._result
+
+        class Values:
+            def __init__(self) -> None:
+                self.batch_gets: list[dict[str, object]] = []
+                self.batch_updates: list[dict[str, object]] = []
+
+            def batchGet(self, **kwargs: object) -> Request:
+                self.batch_gets.append(kwargs)
+                return Request(
+                    {
+                        "valueRanges": [
+                            {"values": [["transaction_id"]]},
+                            {"values": [["import_id"]]},
+                        ]
+                    }
+                )
+
+            def batchUpdate(self, **kwargs: object) -> Request:
+                self.batch_updates.append(kwargs)
+                return Request({})
+
+        class Spreadsheets:
+            def __init__(self) -> None:
+                self.value_resource = Values()
+                self.metadata_reads = 0
+
+            def get(self, **kwargs: object) -> Request:
+                del kwargs
+                self.metadata_reads += 1
+                return Request(
+                    {
+                        "sheets": [{"properties": {"sheetId": 1, "title": "Transactions"}}],
+                        "developerMetadata": [
+                            {
+                                "metadataKey": "family_spend_schema_version",
+                                "metadataValue": "1",
+                            }
+                        ],
+                    }
+                )
+
+            def values(self) -> Values:
+                return self.value_resource
+
+        class Service:
+            def __init__(self, spreadsheets: Spreadsheets) -> None:
+                self._spreadsheets = spreadsheets
+
+            def spreadsheets(self) -> Spreadsheets:
+                return self._spreadsheets
+
+        resource = Spreadsheets()
+        with TemporaryDirectory() as directory:
+            client = GoogleApiSheetsClient(
+                FileCredentialStore(Path(directory) / "credentials.json"),
+                service_builder=lambda: Service(resource),
+            )
+
+            rows = client.read_many_rows("workbook-1", ("Transactions", "Imports"))
+            client.write_many_rows(
+                "workbook-1",
+                (
+                    ("Transactions", 3, (("txn-1",),)),
+                    ("Imports", 3, (("import-1",),)),
+                ),
+            )
+            self.assertEqual(("Transactions",), client.worksheet_names("workbook-1"))
+            self.assertEqual("1", client.schema_version("workbook-1"))
+
+        self.assertEqual((("transaction_id",),), rows["Transactions"])
+        self.assertEqual(1, len(resource.value_resource.batch_gets))
+        self.assertEqual(
+            ["'Transactions'", "'Imports'"],
+            resource.value_resource.batch_gets[0]["ranges"],
+        )
+        self.assertEqual(1, len(resource.value_resource.batch_updates))
+        self.assertEqual(1, resource.metadata_reads)
+        update_body = resource.value_resource.batch_updates[0]["body"]
+        assert isinstance(update_body, dict)
+        update_data = update_body.get("data")
+        assert isinstance(update_data, list)
+        self.assertEqual(2, len(update_data))
+
+    def test_google_client_retries_rate_limits_with_exponential_backoff(self) -> None:
+        sleeps: list[float] = []
+
+        class Request:
+            attempts = 0
+
+            def execute(self) -> dict[str, object]:
+                self.attempts += 1
+                if self.attempts <= 2:
+                    raise HttpError(Response({"status": "429"}), b"rate limited")
+                return {"sheets": []}
+
+        request = Request()
+
+        class Spreadsheets:
+            def get(self, **kwargs: object) -> Request:
+                del kwargs
+                return request
+
+        class Service:
+            def spreadsheets(self) -> Spreadsheets:
+                return Spreadsheets()
+
+        with TemporaryDirectory() as directory:
+            client = GoogleApiSheetsClient(
+                FileCredentialStore(Path(directory) / "credentials.json"),
+                service_builder=Service,
+                sleeper=sleeps.append,
+            )
+
+            self.assertEqual((), client.worksheet_names("workbook-1"))
+
+        self.assertEqual(3, request.attempts)
+        self.assertEqual([1.0, 2.0], sleeps)
+
+    def test_google_client_reports_actionable_error_after_rate_limit_retries(self) -> None:
+        class Request:
+            def execute(self) -> dict[str, object]:
+                raise HttpError(Response({"status": "429"}), b"rate limited")
+
+        class Spreadsheets:
+            def get(self, **kwargs: object) -> Request:
+                del kwargs
+                return Request()
+
+        class Service:
+            def spreadsheets(self) -> Spreadsheets:
+                return Spreadsheets()
+
+        with TemporaryDirectory() as directory:
+            client = GoogleApiSheetsClient(
+                FileCredentialStore(Path(directory) / "credentials.json"),
+                service_builder=Service,
+                sleeper=lambda _: None,
+                rate_limit_retries=0,
+            )
+
+            with self.assertRaisesRegex(FamilySpendError, "temporarily rate limited"):
+                client.worksheet_names("workbook-1")
+
     def test_google_client_replaces_dashboard_values_and_native_charts(self) -> None:
         events: list[str] = []
 
@@ -149,17 +325,9 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
         self.assertIn('"targetAxis": "LEFT_AXIS"', serialized)
 
     def test_partial_import_retries_converge_without_duplicate_rows(self) -> None:
-        scenarios = (
-            (1, False),  # before the pending audit write
-            (2, True),  # ambiguous failure after transaction rows reached Sheets
-            (4, False),  # before the final audit status update
-        )
-        for write_number, after_write in scenarios:
+        for after_write in (False, True):
             with (
-                self.subTest(
-                    write_number=write_number,
-                    after_write=after_write,
-                ),
+                self.subTest(after_write=after_write),
                 TemporaryDirectory() as directory,
             ):
                 sheets = FaultInjectingSheetsClient()
@@ -201,7 +369,7 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
                 )
                 path = Path(directory) / "statement.pdf"
                 write_statement(path)
-                sheets.inject_failure(write_number, after_write=after_write)
+                sheets.inject_batch_failure(after_write=after_write)
 
                 with self.assertRaisesRegex(FamilySpendError, "Retry the same statement"):
                     workflow.execute(path)
@@ -210,13 +378,63 @@ class GoogleWorkbookGatewayContractTests(unittest.TestCase):
                 transaction_rows = sheets.read_rows(gateway.workbook_id, "Transactions")[2:]
                 rule_rows = sheets.read_rows(gateway.workbook_id, "Merchant Rules")[2:]
                 import_rows = sheets.read_rows(gateway.workbook_id, "Imports")[2:]
-                self.assertEqual(ImportStatus.COMPLETE, result.status)
+                self.assertIn(result.status, {ImportStatus.COMPLETE, ImportStatus.SKIPPED})
                 self.assertEqual(8, len(transaction_rows))
                 self.assertEqual(8, len({row[0] for row in transaction_rows}))
                 self.assertEqual(8, len({row[1] for row in transaction_rows}))
                 self.assertEqual(1, len(rule_rows))
                 self.assertEqual(1, len(import_rows))
                 self.assertEqual("complete", import_rows[0][10])
+
+    def test_import_uses_one_snapshot_read_and_one_atomic_batch_write(self) -> None:
+        sheets = CountingSheetsClient()
+        gateway = GoogleWorkbookFactory(sheets).create("Family Spending")
+        gateway.provision_schema()
+        sheets.write_rows(
+            gateway.workbook_id,
+            "Members",
+            3,
+            (
+                ("member-alpha", "Alpha", "MEMBER ALPHA", True),
+                ("member-beta", "Beta", "MEMBER BETA", True),
+            ),
+        )
+        sheets.write_rows(
+            gateway.workbook_id,
+            "Accounts",
+            3,
+            (
+                (
+                    "amex-primary",
+                    "amex",
+                    "ending-10005",
+                    "member-alpha",
+                    "AMEX",
+                    True,
+                ),
+            ),
+        )
+        sheets.batch_read_count = 0
+        sheets.batch_write_count = 0
+        engine = ReviewEngine()
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "statement.pdf"
+            write_statement(path)
+            workflow = SingleImportWorkflow(
+                ingestion=build_ingestion(),
+                review_engine=engine,
+                reviewer=ApprovingReviewer(engine, save_rule=True),
+                workbook=gateway,
+                configuration=gateway.load_configuration(),
+                cache=InMemoryStructuredCache(),
+                clock=FixedClock(datetime(2026, 8, 10, 12, 0, tzinfo=UTC)),
+            )
+
+            result = workflow.execute(path)
+
+        self.assertEqual(ImportStatus.COMPLETE, result.status)
+        self.assertEqual(1, sheets.batch_read_count)
+        self.assertEqual(1, sheets.batch_write_count)
 
     def test_provisioning_is_retry_safe_and_loads_seeded_categories(self) -> None:
         sheets = InMemorySheetsClient()

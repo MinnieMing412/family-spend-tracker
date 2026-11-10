@@ -96,12 +96,14 @@ class ApprovingReviewer:
         self._resolve_near = resolve_near
         self.call_count = 0
         self.seen_duplicate_states: list[tuple[DuplicateState, ...]] = []
+        self.seen_source_paths: list[str | None] = []
 
     def review(self, state: ReviewState) -> ReviewState:
         self.call_count += 1
         self.seen_duplicate_states.append(
             tuple(row.duplicate_state for row in state.rows)
         )
+        self.seen_source_paths.append(state.source_path)
         rows = []
         for row in state.rows:
             corrected = row

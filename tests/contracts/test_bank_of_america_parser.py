@@ -155,6 +155,39 @@ class BankOfAmericaParserContractTests(unittest.TestCase):
         self.assertEqual(6, len(statement.transactions))
         self.assertEqual(ReconciliationStatus.MATCHED, reconcile_statement(statement).status)
 
+    def test_deposit_parser_handles_section_continued_on_next_page(self) -> None:
+        source = ValidatedPdfDocument(
+            Path("continued.pdf"),
+            "continued.pdf",
+            "4" * 64,
+            3,
+            (
+                "BANK OF AMERICA\n"
+                "Synthetic Advantage Banking\n"
+                "for March 10, 2026 to April 8, 2026\n"
+                "Account number: XXXX XXXX 2819\n"
+                "Account summary\n"
+                "Deposits and other additions 0.00\n"
+                "Withdrawals and other subtractions -30.00\n"
+                "Checks -0.00\n"
+                "Service fees -0.00\n"
+                "Ending balance on April 8, 2026 $970.00",
+                "Withdrawals and other subtractions\n"
+                "Date Description Amount\n"
+                "03/25/26 FIRST PAYMENT -20.00\n"
+                "continued on the next page",
+                "Withdrawals and other subtractions - continued\n"
+                "Date Description Amount\n"
+                "03/26/26 SECOND PAYMENT -10.00\n"
+                "Total withdrawals and other subtractions -$30.00",
+            ),
+        )
+
+        statement = BankOfAmericaStatementParser().parse(source).statement
+
+        self.assertEqual(2, len(statement.transactions))
+        self.assertEqual(ReconciliationStatus.MATCHED, reconcile_statement(statement).status)
+
     def test_deposit_parser_removes_sensitive_reference_fields(self) -> None:
         source = ValidatedPdfDocument(
             Path("deposit.pdf"),

@@ -46,9 +46,13 @@ table with textual flags so accessibility does not depend on color. Commands
 support all/exception filters, field edits, bulk category assignment, bulk
 merchant normalization by reference-row match, merchant rule decisions,
 near-duplicate resolution, reconciliation overrides, explicit approval, and
-cancellation. `bulk-merchant ROW MERCHANT` updates every current row with the
-same normalized merchant as `ROW`; `save-rule ROW exact|contains` persists a
-reviewed merchant/category decision for subsequent imports only.
+cancellation. `bulk-merchant MERCHANT ROW [ROW ...]` updates only the selected
+rows. The `--same-as ROW` selector on either bulk command targets every exact
+current merchant match to the reference row.
+`save-rules exact|contains ROW [ROW ...]` persists distinct selected
+merchant/category decisions for subsequent imports only;
+`save-rules exact|contains unsaved` selects every eligible row without existing
+or pending rule coverage.
 
 Every table render ends with the complete command guide immediately before the
 input prompt. Edits and filters therefore redraw both the current review state
