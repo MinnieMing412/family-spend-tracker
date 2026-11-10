@@ -43,9 +43,16 @@ unavailable and block clean approval.
 
 `TerminalReviewPort` is a line-oriented, dependency-free adapter. It renders a
 table with textual flags so accessibility does not depend on color. Commands
-support all/exception filters, field edits, bulk category assignment, merchant
-rule decisions, near-duplicate resolution, reconciliation overrides, explicit
-approval, and cancellation.
+support all/exception filters, field edits, bulk category assignment, bulk
+merchant normalization by reference-row match, merchant rule decisions,
+near-duplicate resolution, reconciliation overrides, explicit approval, and
+cancellation. `bulk-merchant ROW MERCHANT` updates every current row with the
+same normalized merchant as `ROW`; `save-rule ROW exact|contains` persists a
+reviewed merchant/category decision for subsequent imports only.
+
+Every table render ends with the complete command guide immediately before the
+input prompt. Edits and filters therefore redraw both the current review state
+and its available actions without requiring separate documentation lookup.
 
 Acceptance tests use scripted `ReviewPort` implementations and assert final
 state rather than terminal keystroke internals. Cancellation returns before any

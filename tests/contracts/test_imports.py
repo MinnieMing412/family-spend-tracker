@@ -19,6 +19,7 @@ from family_spend.domain.models import (
     NormalizedTransaction,
     TransactionType,
 )
+from family_spend.errors import FamilySpendError
 from family_spend.imports import (
     SingleImportWorkflow,
     assign_fingerprints,
@@ -191,7 +192,7 @@ class SingleImportWorkflowTests(unittest.TestCase):
                 write_statement(path)
                 gateway.fail_next_commit_at(stage)
 
-                with self.assertRaisesRegex(RuntimeError, stage):
+                with self.assertRaisesRegex(FamilySpendError, "Retry the same statement"):
                     workflow.execute(path)
                 result = workflow.execute(path)
 

@@ -204,6 +204,8 @@ class BackfillCliAcceptanceTests(unittest.TestCase):
         self.assertEqual((0, ""), (result[0], result[2]))
         self.assertIn("rejected: 1", result[1])
         self.assertIn("unresolved: 0", result[1])
+        self.assertIn("- broken.pdf: rejected", result[1])
+        self.assertIn("next: replace the PDF", result[1])
 
     def test_interruption_checkpoints_and_resume_finishes_remaining_work(self) -> None:
         class InterruptSecondCommitGateway(InMemoryWorkbookGateway):
@@ -243,6 +245,7 @@ class BackfillCliAcceptanceTests(unittest.TestCase):
         self.assertIn("Backfill incomplete", interrupted[1])
         self.assertIn("imported: 1", interrupted[1])
         self.assertIn("unresolved: 1", interrupted[1])
+        self.assertIn(": unresolved; next: retry the same backfill with --resume", interrupted[1])
         self.assertIn("Backfill complete", resumed[1])
         self.assertIn("imported: 1", resumed[1])
         self.assertIn("duplicates: 1", resumed[1])

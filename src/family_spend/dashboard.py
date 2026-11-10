@@ -75,6 +75,8 @@ class DashboardLayout:
     charts: tuple[DashboardChart, ...]
     validations: tuple[DashboardValidation, ...]
     header_ranges: tuple[str, ...] = ()
+    member_month_support_range: str = ""
+    category_month_support_range: str = ""
 
 
 def _month_start(value: date) -> date:
@@ -281,10 +283,10 @@ def build_dashboard_layout(*, member_count: int = 8, category_count: int = 19) -
         '=ARRAYFORMULA(IF(A56:A="","",(Transactions!P3:P=TRUE)'
         "*(ROW(Transactions!B3:B)=MATCH(Transactions!B3:B,Transactions!B:B,0))))",
         f'=ARRAYFORMULA(IF(A56:A="","",REGEXMATCH(H56:H,"{_eligible_type_pattern()}")))',
-        '=ARRAYFORMULA(IF(A56:A="","",IF((I56:I=TRUE)*(J56:J=TRUE),'
+        '=ARRAYFORMULA(IF(A56:A="","",IF((I56:I=1)*(J56:J=TRUE),'
         "IF(ISNUMBER(Transactions!L3:L),Transactions!L3:L,VALUE(Transactions!L3:L)),0)))",
-        '=ARRAYFORMULA(IF(A56:A="","",(I56:I=TRUE)*(H56:H="cash_advance")))',
-        '=ARRAYFORMULA(IF(A56:A="","",(I56:I=TRUE)*(J56:J=TRUE)'
+        '=ARRAYFORMULA(IF(A56:A="","",(I56:I=1)*(H56:H="cash_advance")))',
+        '=ARRAYFORMULA(IF(A56:A="","",(I56:I=1)*(J56:J=TRUE)'
         "*(A56:A>=$B$4)*(A56:A<=$B$5)"
         '*IF($B$6="All",TRUE,C56:C=$B$6)'
         '*IF($B$7="All",TRUE,D56:D=$B$7)'
@@ -382,7 +384,7 @@ def build_dashboard_layout(*, member_count: int = 8, category_count: int = 19) -
             DashboardChart(
                 "Member spending by month",
                 "COLUMN",
-                f"W55:{_column_name(member_end_column)}200",
+                f"W56:{_column_name(member_end_column)}200",
                 member_series_count,
                 34,
                 12,
@@ -404,5 +406,9 @@ def build_dashboard_layout(*, member_count: int = 8, category_count: int = 19) -
             "T55:U55",
             f"W55:{_column_name(member_end_column)}55",
             (f"{_column_name(category_start_column)}55:{_column_name(category_end_column)}55"),
+        ),
+        member_month_support_range=f"W55:{_column_name(member_end_column)}200",
+        category_month_support_range=(
+            f"{_column_name(category_start_column)}55:{_column_name(category_end_column)}200"
         ),
     )

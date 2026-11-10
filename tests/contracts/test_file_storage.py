@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from family_spend.adapters.local import (
     FileCheckpointStore,
@@ -14,6 +15,21 @@ from family_spend.domain.models import BackfillCheckpoint, LocalSettings
 
 
 class FileSettingsStoreContractTests(unittest.TestCase):
+    def test_failed_private_write_removes_its_temporary_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings_path = root / "settings.json"
+            store = FileSettingsStore(settings_path)
+
+            with (
+                patch.object(Path, "replace", side_effect=OSError("disk unavailable")),
+                self.assertRaisesRegex(OSError, "disk unavailable"),
+            ):
+                store.save(LocalSettings("workbook-1", "credentials.json"))
+
+            self.assertFalse(settings_path.exists())
+            self.assertEqual((), tuple(root.glob(".settings.json.*")))
+
     def test_backfill_checkpoint_round_trip_is_private(self) -> None:
         with TemporaryDirectory() as directory:
             store = FileCheckpointStore(Path(directory) / "checkpoints")

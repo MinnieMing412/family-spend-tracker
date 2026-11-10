@@ -121,6 +121,7 @@ class ParserRegistration:
     markers: tuple[str, ...]
     parser: StatementParser
     minimum_markers: int = 2
+    identity_markers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Require multiple markers so filenames or one phrase cannot decide."""
@@ -140,6 +141,11 @@ class MarkerParserRegistry:
         evidence: list[str] = []
         lowered_pages = tuple(page.casefold() for page in source.page_texts)
         for registration in self._registrations:
+            first_page = lowered_pages[0] if lowered_pages else ""
+            if registration.identity_markers and not any(
+                marker.casefold() in first_page for marker in registration.identity_markers
+            ):
+                continue
             matches: list[str] = []
             for marker_index, marker in enumerate(registration.markers, start=1):
                 for page_index, page_text in enumerate(lowered_pages, start=1):
