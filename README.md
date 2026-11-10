@@ -91,15 +91,31 @@ merchants, applies workbook rules, reconciles statement sections, and displays
 a text-labeled review table. A command guide appears beneath every rendered
 table, immediately before the `review>` prompt, so edit, filter, bulk-category,
 bulk-merchant, rule-save, reconciliation-override, approval, and cancellation
-syntax remains visible throughout review. `bulk-merchant ROW NAME` renames every
-current row whose merchant matches the reference row. `save-rule ROW
-exact|contains` stores the reviewed merchant/category decision for later
-imports; it does not retroactively edit other rows in the current review.
+syntax remains visible throughout review. `bulk-merchant MERCHANT ROW [ROW ...]`
+renames only the selected rows; multi-word merchant names do not require quotes.
+Use `bulk-merchant MERCHANT --same-as ROW` or
+`bulk-category CATEGORY --same-as ROW` to update every row whose current
+merchant exactly matches the reference row.
+`save-rules exact|contains ROW [ROW ...]` stores the selected reviewed
+merchant/category decisions for later imports. Use
+`save-rules exact|contains unsaved` to save every eligible row currently shown
+as unsaved. Rule saving does not retroactively edit other rows in the current
+review.
 
-Approval writes the reviewed transactions and any selected merchant rules. The
-same statement is skipped on repeat, exact overlapping rows are omitted, and
-near-duplicates require an explicit review decision. This command intentionally
-accepts exactly one PDF.
+At command start, configuration, prior imports, and transaction fingerprints are
+loaded into one local snapshot. Parsing, duplicate checks, and review use that
+snapshot without repeatedly reading Google Sheets. Approval sends transactions,
+selected merchant rules, and the completed import audit through one atomic batch
+write. The same statement is skipped on repeat, exact overlapping rows are
+omitted, and near-duplicates require an explicit review decision. This command
+intentionally accepts exactly one PDF.
+
+Parser-level statement warnings appear below the review table with the full
+local PDF path and extracted page/line evidence. After checking the cited PDF
+location, acknowledge one explicitly with
+`acknowledge-warning CODE`; unacknowledged warnings keep approval blocked.
+Use `filter unsaved` to show only resolved spending rows that are not covered
+by an existing or newly selected merchant rule.
 
 For a historical folder, use recursive backfill:
 
@@ -112,7 +128,9 @@ Backfill shows the complete discovered path list before parsing, orders supporte
 statements by closing date, bulk-approves only clean statements after confirmation,
 and routes exceptions through the normal individual review. It checkpoints after
 each attempted statement outside the repository. The workbook remains the
-authoritative completion record when a run resumes.
+authoritative completion record when a run resumes. Google 429 rate limits are
+retried with exponential backoff across the one-minute quota window; a command
+that still cannot proceed exits with a short instruction to retry with `--resume`.
 
 Bank of America support covers consumer credit-card and deposit-account layouts documented in
 [the Phase 5A architecture note](docs/architecture/phase-5a-bank-of-america-parser.md),

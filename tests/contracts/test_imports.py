@@ -131,6 +131,8 @@ class SingleImportWorkflowTests(unittest.TestCase):
             first = workflow.execute(path)
             second = workflow.execute(path)
 
+            self.assertEqual([str(path.resolve())], reviewer.seen_source_paths)
+
         self.assertEqual(ImportStatus.COMPLETE, first.status)
         self.assertEqual(ImportStatus.SKIPPED, second.status)
         self.assertEqual(1, reviewer.call_count)

@@ -19,11 +19,11 @@ from family_spend.domain.models import (
     TransactionType,
     WarningSeverity,
 )
-from family_spend.errors import FamilySpendError
+from family_spend.errors import FamilySpendError, redact
 from family_spend.ports import ValidatedPdf
 
 _DATE_TOKEN = r"\d{1,2}/\d{1,2}(?:/\d{2,4})?"
-_AMOUNT_TOKEN = r"[+-]?\$?[\d,]+\.\d{2}-?"
+_AMOUNT_TOKEN = r"[+-]?\$?(?:[\d,]+\.\d{2}|\.\d{2})-?"
 _TRANSACTION = re.compile(
     rf"^\s*(?P<date>{_DATE_TOKEN})\s+(?P<description>.+?)\s+"
     rf"(?P<amount>{_AMOUNT_TOKEN})\s*$",
@@ -199,12 +199,18 @@ class ChaseStatementParser:
                         )
                     )
                 elif re.match(rf"^{_DATE_TOKEN}\b", line):
+                    preview = redact(cls._safe_description(line)).replace('"', "'")
+                    if len(preview) > 80:
+                        preview = preview[:77].rstrip() + "..."
                     warnings.append(
                         DomainWarning(
                             code="chase-partial-transaction-row",
-                            message="A Chase activity row did not contain a parseable amount.",
+                            message=(
+                                "A Chase activity row did not contain a parseable amount: "
+                                f'"{preview}".'
+                            ),
                             severity=WarningSeverity.WARNING,
-                            evidence_ref=f"page-{page_number}:line-{line_number}",
+                            evidence_ref=f"PDF page {page_number}",
                         )
                     )
         return rows, warnings

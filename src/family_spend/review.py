@@ -399,6 +399,8 @@ class ReviewEngine:
             saved_rules=rules,
             valid_member_ids=state.valid_member_ids,
             valid_category_ids=state.valid_category_ids,
+            acknowledged_warning_codes=state.acknowledged_warning_codes,
+            source_path=state.source_path,
         )
 
 

@@ -375,6 +375,8 @@ class ReviewState:
     saved_rules: tuple[MerchantRule, ...] = ()
     valid_member_ids: tuple[str, ...] = ()
     valid_category_ids: tuple[str, ...] = ()
+    acknowledged_warning_codes: tuple[str, ...] = ()
+    source_path: str | None = None
 
     def __post_init__(self) -> None:
         """Validate that the review uses a supported status."""
@@ -392,6 +394,7 @@ class ReviewState:
         }
         statement_warning = any(
             warning.severity in {WarningSeverity.WARNING, WarningSeverity.ERROR}
+            and warning.code not in self.acknowledged_warning_codes
             for warning in self.statement.warnings
         )
         invalid_reference = any(

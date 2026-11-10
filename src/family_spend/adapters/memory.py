@@ -419,6 +419,17 @@ class InMemorySheetsClient:
             raise ValueError(f"worksheet not found: {worksheet}") from error
         return tuple(tuple(row) for row in rows)
 
+    def read_many_rows(
+        self,
+        workbook_id: str,
+        worksheets: tuple[str, ...],
+    ) -> dict[str, tuple[tuple[object, ...], ...]]:
+        """Return a consistent in-memory snapshot of several worksheets."""
+        return {
+            worksheet: self.read_rows(workbook_id, worksheet)
+            for worksheet in worksheets
+        }
+
     def write_rows(
         self,
         workbook_id: str,
@@ -441,6 +452,33 @@ class InMemorySheetsClient:
                 stored_rows[target] = replacement
             else:
                 stored_rows.append(replacement)
+
+    def write_many_rows(
+        self,
+        workbook_id: str,
+        writes: tuple[
+            tuple[str, int, tuple[tuple[object, ...], ...]],
+            ...,
+        ],
+    ) -> None:
+        """Apply several writes atomically to the in-memory workbook."""
+        sheets = self._sheets(workbook_id)
+        for worksheet, start_row, _ in writes:
+            if worksheet not in sheets:
+                raise ValueError(f"worksheet not found: {worksheet}")
+            if start_row < 1:
+                raise ValueError("start row must be positive")
+        original = {
+            worksheet: [list(row) for row in sheets[worksheet]]
+            for worksheet, _, _ in writes
+        }
+        try:
+            for worksheet, start_row, batch_rows in writes:
+                self.write_rows(workbook_id, worksheet, start_row, batch_rows)
+        except Exception:
+            for worksheet, restored_rows in original.items():
+                sheets[worksheet] = restored_rows
+            raise
 
     def replace_dashboard(self, workbook_id: str, layout: DashboardLayout) -> None:
         """Replace simulated Dashboard rows and chart metadata atomically."""

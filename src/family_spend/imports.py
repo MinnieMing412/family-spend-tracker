@@ -178,10 +178,13 @@ class SingleImportWorkflow:
             near_candidates,
         )
         statement = replace(parsed, transactions=fingerprinted)
-        initial = self._review_engine.prepare(
-            statement,
-            self._configuration,
-            duplicates=duplicate_states,
+        initial = replace(
+            self._review_engine.prepare(
+                statement,
+                self._configuration,
+                duplicates=duplicate_states,
+            ),
+            source_path=str(source.expanduser().resolve()),
         )
         return PreparedImport(
             source=source,
@@ -383,6 +386,10 @@ class SingleImportWorkflow:
                 (
                     "saved_rule_ids",
                     json.dumps(list(state.saved_rule_ids), sort_keys=True),
+                ),
+                (
+                    "acknowledged_warning_codes",
+                    json.dumps(list(state.acknowledged_warning_codes), sort_keys=True),
                 ),
             ),
         )

@@ -21,17 +21,26 @@ explicitly resolve the row.
 
 ## Retry-safe workbook commit
 
-The import ID and transaction IDs are stable across attempts. Workbook commit
-uses this sequence:
+The import ID and transaction IDs are stable across attempts. At command start,
+the gateway loads configuration, import history, and transaction rows with one
+`values.batchGet` request. Review and duplicate classification use this local,
+command-scoped snapshot. A completed review builds one `values.batchUpdate`
+containing:
 
-1. Create or replace one deterministic `pending` import audit row.
-2. Read existing transaction IDs and fingerprints, then append only missing rows.
-3. Read existing merchant-rule IDs, then append only missing selected rules.
-4. Replace the audit row with `complete`.
+1. Any approved transaction rows absent from the snapshot.
+2. Any selected merchant rules absent from the snapshot.
+3. One deterministic `complete` import audit row.
 
-A retry after any boundary repeats those reads and converges to one audit row,
-one copy of each transaction, and one copy of each rule. A `complete` audit row
-is authoritative and causes later attempts to skip.
+Google applies the value ranges atomically, eliminating partially authoritative
+transaction/rule/audit states. After success, the gateway updates its local
+snapshot so later statements in the same backfill see the newly approved rows
+and rules without another provider read. After an ambiguous network failure, it
+invalidates the snapshot and reloads authoritative workbook state before retry.
+A `complete` audit row causes later attempts to skip.
+
+HTTP 429 responses use bounded exponential backoff across a full quota window.
+If retries are exhausted, the CLI reports a concise resume instruction instead
+of exposing the raw provider response.
 
 ## Privacy and cache lifecycle
 
@@ -50,6 +59,6 @@ preserves it as JSON in the application cache directory with directory mode
 The primary acceptance test invokes the CLI with a synthetic AMEX PDF, scripted
 review, isolated settings/cache boundaries, and an in-memory workbook. It checks
 the first write, unchanged repeat, cancellation, invalid input, privacy, and
-cache cleanup/retention. Workbook contract tests inject failures before the
-audit write, after the transaction write, and before final status to prove both
-the in-memory and Google Sheets gateways converge on retry.
+cache cleanup/retention. Workbook contract tests assert one snapshot read and
+one atomic batch write, then inject failures before and after the provider batch
+to prove both outcomes converge without duplicates.

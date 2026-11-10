@@ -92,7 +92,8 @@ part of cache cleanup.
 | PDF is scanned, encrypted, corrupt, or unsupported | Obtain a text-bearing supported statement; no rows were uploaded. |
 | Review fails or is cancelled | Correct the review input and retry the same statement; incomplete review uploads nothing. |
 | Workbook write fails before rows are confirmed | Retry the same statement. Stable import IDs and fingerprints prevent duplicates. |
-| Workbook write may have partially completed | Retry the same statement; the pending import converges to one completed record. |
+| Workbook write may have completed despite a lost response | Retry the same statement; the refreshed snapshot detects the completed atomic batch. |
+| Google reports HTTP 429 or quota exceeded | Let automatic backoff finish. If it exits, wait one minute and rerun the same backfill with `--resume`. |
 | Backfill is incomplete | Follow its per-file next action and rerun with `--resume`. |
 | Cache cleanup fails | Run `status`, delete only the named cache file, then retry safely. |
 | Authorization is stale or revoked | Run `disconnect`, then `setup` with the Desktop-app client JSON. |

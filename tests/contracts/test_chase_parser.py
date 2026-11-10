@@ -144,7 +144,13 @@ class ChaseParserContractTests(unittest.TestCase):
 
         result = ChaseStatementParser().parse(partial)
 
-        self.assertIn("chase-partial-transaction-row", {item.code for item in result.warnings})
+        warning = next(
+            item
+            for item in result.warnings
+            if item.code == "chase-partial-transaction-row"
+        )
+        self.assertEqual("PDF page 3", warning.evidence_ref)
+        self.assertIn("12/02 INCOMPLETE ACTIVITY ROW", warning.message)
         unsupported = ValidatedPdfDocument(
             Path("unknown.pdf"),
             "unknown.pdf",
@@ -157,6 +163,29 @@ class ChaseParserContractTests(unittest.TestCase):
             "Unsupported Chase credit-card layout.*masked account",
         ):
             ChaseStatementParser().parse(unsupported)
+
+    def test_purchase_amount_without_leading_zero_is_parsed(self) -> None:
+        source = ValidatedPdfDocument(
+            Path("sub-dollar.pdf"),
+            "sub-dollar.pdf",
+            "f" * 64,
+            1,
+            (
+                "CHASE\n"
+                "Account Number: XXXX 7466\n"
+                "Opening/Closing Date 02/18/26 - 03/17/26\n"
+                "Account Activity\n"
+                "PURCHASE\n"
+                "03/06 99 RANCH #1779 CUPERTINO CA .47",
+            ),
+        )
+
+        result = ChaseStatementParser().parse(source)
+
+        self.assertEqual("0.47", str(result.statement.transactions[0].amount.amount))
+        self.assertFalse(
+            any(item.code == "chase-partial-transaction-row" for item in result.warnings)
+        )
 
 
 if __name__ == "__main__":
